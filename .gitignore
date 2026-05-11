@@ -6,5 +6,6 @@ bun.lockb
 .DS_Store
 .gstack/
 .cache/
+data/
 test-results/
 playwright-report/
