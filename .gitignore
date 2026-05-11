@@ -5,3 +5,6 @@ bun.lock
 bun.lockb
 .DS_Store
 .gstack/
+.cache/
+test-results/
+playwright-report/

@@ -1,0 +1,297 @@
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { createApp, parseEnv, ValidationError } from "../src/app.ts";
+import type { AppEnv } from "../src/app.ts";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+const STATION_BODY = {
+  ok: true,
+  stations: [
+    {
+      id: "abc",
+      name: "Aral",
+      brand: "Aral",
+      street: "Hauptstr",
+      houseNumber: "1",
+      postCode: 10115,
+      place: "Berlin",
+      lat: 52.5,
+      lng: 13.4,
+      dist: 1.2,
+      isOpen: true,
+      e5: 1.789,
+      e10: 1.749,
+      diesel: 1.659,
+    },
+  ],
+};
+
+let cacheDir: string;
+let publicDir: string;
+let dataDir: string;
+
+beforeEach(async () => {
+  cacheDir = await mkdtemp(join(tmpdir(), "gas-cache-"));
+  publicDir = await mkdtemp(join(tmpdir(), "gas-public-"));
+  dataDir = await mkdtemp(join(tmpdir(), "gas-data-"));
+  await Bun.write(join(publicDir, "index.html"), "<!doctype html><h1>hi</h1>");
+});
+
+afterEach(async () => {
+  await rm(cacheDir, { recursive: true, force: true });
+  await rm(publicDir, { recursive: true, force: true });
+  await rm(dataDir, { recursive: true, force: true });
+});
+
+function env(overrides: Partial<AppEnv> = {}): AppEnv {
+  return {
+    apiKey: "test-key",
+    defaultLat: 52.52,
+    defaultLng: 13.405,
+    defaultRadius: 5,
+    publicDir,
+    cacheDir,
+    cacheTtlMs: 60_000,
+    cacheMaxEntries: 200,
+    dataDir,
+    historyMaxFileBytes: 1024 * 1024,
+    alertThresholds: {},
+    alertDesktopNotify: false,
+    ...overrides,
+  };
+}
+
+function mockFetch(body: unknown, status = 200): typeof fetch {
+  return (async () => new Response(JSON.stringify(body), { status })) as unknown as typeof fetch;
+}
+
+async function call(app: ReturnType<typeof createApp>, method: string, path: string): Promise<Response> {
+  const req = new Request(`http://localhost${path}`, { method });
+  const url = new URL(req.url);
+  const route = (app.routes as Record<string, Record<string, (r: Request) => Response | Promise<Response>>>)[
+    url.pathname
+  ];
+  if (route) {
+    const handler = route[method];
+    if (!handler) return new Response("method not allowed", { status: 405 });
+    return await handler(req);
+  }
+  return await app.fetch(req);
+}
+
+describe("parseEnv", () => {
+  test("returns defaults when env is empty", () => {
+    const result = parseEnv({}, "/pub", "/cache", "/data");
+    expect(result).toMatchObject({
+      apiKey: "",
+      defaultLat: 52.52,
+      defaultLng: 13.405,
+      defaultRadius: 5,
+      cacheTtlMs: 5 * 60 * 1000,
+      alertThresholds: {},
+      alertDesktopNotify: false,
+    });
+  });
+
+  test("rejects invalid DEFAULT_LAT (NaN, out of range)", () => {
+    expect(() => parseEnv({ DEFAULT_LAT: "not-a-number" }, "/p", "/c", "/d")).toThrow(/DEFAULT_LAT/);
+    expect(() => parseEnv({ DEFAULT_LAT: "200" }, "/p", "/c", "/d")).toThrow(/DEFAULT_LAT/);
+  });
+
+  test("rejects invalid DEFAULT_RADIUS (out of [1,25])", () => {
+    expect(() => parseEnv({ DEFAULT_RADIUS: "100" }, "/p", "/c", "/d")).toThrow(/DEFAULT_RADIUS/);
+    expect(() => parseEnv({ DEFAULT_RADIUS: "0" }, "/p", "/c", "/d")).toThrow(/DEFAULT_RADIUS/);
+  });
+
+  test("parses alert thresholds when set", () => {
+    const result = parseEnv(
+      { ALERT_E10_BELOW: "1.65", ALERT_DIESEL_BELOW: "1.55", ALERT_DESKTOP_NOTIFY: "true" },
+      "/p",
+      "/c",
+      "/d",
+    );
+    expect(result.alertThresholds).toEqual({ e10: 1.65, diesel: 1.55 });
+    expect(result.alertDesktopNotify).toBe(true);
+  });
+
+  test("rejects invalid alert threshold", () => {
+    expect(() => parseEnv({ ALERT_E5_BELOW: "not-a-number" }, "/p", "/c", "/d")).toThrow(/ALERT_E5_BELOW/);
+  });
+});
+
+describe("/api/config", () => {
+  test("returns defaults and hasApiKey=true", async () => {
+    const app = createApp(env(), { fetch: mockFetch(STATION_BODY) });
+    const res = await call(app, "GET", "/api/config");
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({
+      defaultLat: 52.52,
+      defaultLng: 13.405,
+      defaultRadius: 5,
+      hasApiKey: true,
+      alertsEnabled: false,
+    });
+  });
+
+  test("returns hasApiKey=false when key is empty", async () => {
+    const app = createApp(env({ apiKey: "" }), { fetch: mockFetch(STATION_BODY) });
+    const body = (await (await call(app, "GET", "/api/config")).json()) as { hasApiKey: boolean };
+    expect(body.hasApiKey).toBe(false);
+  });
+});
+
+describe("/api/stations", () => {
+  test("happy path returns stations + fetchedAt", async () => {
+    const app = createApp(env(), { fetch: mockFetch(STATION_BODY) });
+    const res = await call(app, "GET", "/api/stations?lat=52.5&lng=13.4&radius=5");
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { stations: unknown[]; fetchedAt: string };
+    expect(body.stations).toHaveLength(1);
+    expect(body.fetchedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+  });
+
+  test("rejects invalid radius with 400", async () => {
+    const app = createApp(env(), { fetch: mockFetch(STATION_BODY) });
+    const res = await call(app, "GET", "/api/stations?radius=999");
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: string }).error).toMatch(/radius/);
+  });
+
+  test("rejects invalid lat with 400", async () => {
+    const app = createApp(env(), { fetch: mockFetch(STATION_BODY) });
+    const res = await call(app, "GET", "/api/stations?lat=200");
+    expect(res.status).toBe(400);
+  });
+
+  test("rejects invalid fuel type with 400", async () => {
+    const app = createApp(env(), { fetch: mockFetch(STATION_BODY) });
+    const res = await call(app, "GET", "/api/stations?type=xyz");
+    expect(res.status).toBe(400);
+  });
+
+  test("returns 500 when apiKey is missing", async () => {
+    const app = createApp(env({ apiKey: "" }), { fetch: mockFetch(STATION_BODY) });
+    const res = await call(app, "GET", "/api/stations");
+    expect(res.status).toBe(500);
+  });
+
+  test("upstream 5xx maps to 502", async () => {
+    const app = createApp(env(), { fetch: mockFetch("boom", 500) });
+    const res = await call(app, "GET", "/api/stations");
+    expect(res.status).toBe(502);
+  });
+
+  test("cache hit on second call within TTL (single upstream fetch)", async () => {
+    let calls = 0;
+    const fetchImpl = (async () => {
+      calls++;
+      return new Response(JSON.stringify(STATION_BODY), { status: 200 });
+    }) as unknown as typeof fetch;
+    const app = createApp(env(), { fetch: fetchImpl });
+
+    const first = await (await call(app, "GET", "/api/stations?lat=52.5&lng=13.4&radius=5")).json() as { fetchedAt: string };
+    const second = await (await call(app, "GET", "/api/stations?lat=52.5&lng=13.4&radius=5")).json() as { fetchedAt: string };
+
+    expect(calls).toBe(1);
+    expect(second.fetchedAt).toBe(first.fetchedAt);
+  });
+});
+
+describe("static serving", () => {
+  test("GET / serves index.html", async () => {
+    const app = createApp(env(), { fetch: mockFetch(STATION_BODY) });
+    const res = await call(app, "GET", "/");
+    expect(res.status).toBe(200);
+    expect(await res.text()).toContain("<h1>hi</h1>");
+  });
+
+  test("blocks ../ path traversal", async () => {
+    const app = createApp(env(), { fetch: mockFetch(STATION_BODY) });
+    const res = await call(app, "GET", "/%2e%2e/etc/passwd");
+    expect(res.status).toBe(404);
+  });
+
+  test("returns 405 on POST /unknown", async () => {
+    const app = createApp(env(), { fetch: mockFetch(STATION_BODY) });
+    const res = await call(app, "POST", "/index.html");
+    expect(res.status).toBe(405);
+  });
+
+  test("returns 404 for missing files", async () => {
+    const app = createApp(env(), { fetch: mockFetch(STATION_BODY) });
+    const res = await call(app, "GET", "/nope.html");
+    expect(res.status).toBe(404);
+  });
+});
+
+describe("/api/history", () => {
+  test("rejects missing stationIds with 400", async () => {
+    const app = createApp(env(), { fetch: mockFetch(STATION_BODY) });
+    const res = await call(app, "GET", "/api/history");
+    expect(res.status).toBe(400);
+  });
+
+  test("rejects more than 50 stationIds", async () => {
+    const ids = Array.from({ length: 51 }, (_, i) => `s${i}`).join(",");
+    const app = createApp(env(), { fetch: mockFetch(STATION_BODY) });
+    const res = await call(app, "GET", `/api/history?stationIds=${ids}`);
+    expect(res.status).toBe(400);
+  });
+
+  test("returns empty buckets for unknown stationIds", async () => {
+    const app = createApp(env(), { fetch: mockFetch(STATION_BODY) });
+    const res = await call(app, "GET", "/api/history?stationIds=never-seen");
+    expect(res.status).toBe(200);
+    type Buckets = { e5: unknown[]; e10: unknown[]; diesel: unknown[] };
+    const body = (await res.json()) as { stations: Record<string, Buckets> };
+    expect(body.stations["never-seen"]).toEqual({ e5: [], e10: [], diesel: [] });
+  });
+
+  test("returns recorded history after a cache miss writes it", async () => {
+    const app = createApp(env(), { fetch: mockFetch(STATION_BODY) });
+    await call(app, "GET", "/api/stations?lat=52.5&lng=13.4&radius=5");
+    // Give the async history append a tick to settle.
+    await new Promise((r) => setTimeout(r, 30));
+
+    const res = await call(app, "GET", "/api/history?stationIds=abc&days=1");
+    type Buckets = { e5: { ts: number; price: number }[]; e10: { ts: number; price: number }[]; diesel: { ts: number; price: number }[] };
+    const body = (await res.json()) as { stations: Record<string, Buckets> };
+    const bucket = body.stations["abc"];
+    expect(bucket).toBeDefined();
+    expect(bucket!.e10).toHaveLength(1);
+    expect(bucket!.e10[0]?.price).toBe(1.749);
+  });
+});
+
+describe("alerts integration", () => {
+  test("fires alert when stations come back below threshold", async () => {
+    const fetchImpl = (async () =>
+      new Response(
+        JSON.stringify({
+          ok: true,
+          stations: [{ ...STATION_BODY.stations[0], e10: 1.5 }],
+        }),
+        { status: 200 },
+      )) as unknown as typeof fetch;
+
+    const events: unknown[] = [];
+    const app = createApp(
+      env({ alertThresholds: { e10: 1.6 } }),
+      {
+        fetch: fetchImpl,
+        alertDeps: { log: (m: string) => events.push(m) },
+      },
+    );
+    await call(app, "GET", "/api/stations?lat=52.5&lng=13.4&radius=5");
+    await new Promise((r) => setTimeout(r, 30));
+    expect(events.some((e) => String(e).includes("E10 dropped"))).toBe(true);
+  });
+});
+
+describe("ValidationError", () => {
+  test("carries default status 400", () => {
+    const err = new ValidationError("bad");
+    expect(err.status).toBe(400);
+  });
+});
