@@ -55,6 +55,12 @@
     .price.cheap { color: var(--accent); }
     .price.na { color: var(--muted); font-weight: 400; }
     .dist { color: var(--muted); font-variant-numeric: tabular-nums; }
+    .cell-stack { display: flex; flex-direction: column; gap: 2px; }
+    .spark { height: 14px; min-width: 60px; color: var(--muted); }
+    .spark-svg { display: block; }
+    .spark-svg.trend-down { color: var(--accent); }
+    .spark-svg.trend-up { color: var(--err); }
+    .spark-svg.trend-flat { color: var(--muted); }
     .badge { display: inline-block; padding: 2px 6px; border-radius: 4px; font-size: 10px;
       text-transform: uppercase; letter-spacing: 0.05em; }
     .badge.open { background: rgba(74, 222, 128, 0.15); color: var(--accent); }
@@ -115,8 +121,8 @@
     const state = {
       sort: { col: "dist", dir: "asc" },
       stations: [],
-      fuel: "all",
       refreshTimer: null,
+      inflight: null,
     };
 
     function loadPrefs() {
@@ -149,19 +155,57 @@
       el.className = "status " + cls;
     }
 
-    function formatPrice(p) {
-      if (p === false || p === 0 || p == null) {
-        return '<span class="price na">—</span>';
-      }
-      return `<span class="price">${p.toFixed(3)} €</span>`;
-    }
-
-    function priceCell(p, cheapest) {
+    function priceCell(p, cheapest, stationId, fuel) {
       if (p === false || p === 0 || p == null) {
         return '<td><span class="price na">—</span></td>';
       }
       const cls = (cheapest != null && p === cheapest) ? "price cheap" : "price";
-      return `<td><span class="${cls}">${p.toFixed(3)} €</span></td>`;
+      const sparkId = `spark-${stationId}-${fuel}`;
+      return `<td><div class="cell-stack"><span class="${cls}">${p.toFixed(3)} €</span><span class="spark" id="${sparkId}"></span></div></td>`;
+    }
+
+    function renderSparkline(points) {
+      if (!points || points.length < 2) return "";
+      const w = 60;
+      const h = 14;
+      const prices = points.map((p) => p.price);
+      const min = Math.min(...prices);
+      const max = Math.max(...prices);
+      const range = max - min || 1;
+      const tsMin = points[0].ts;
+      const tsMax = points[points.length - 1].ts;
+      const tsRange = tsMax - tsMin || 1;
+      const coords = points.map((p) => {
+        const x = ((p.ts - tsMin) / tsRange) * w;
+        const y = h - ((p.price - min) / range) * h;
+        return `${x.toFixed(1)},${y.toFixed(1)}`;
+      });
+      const last = prices[prices.length - 1];
+      const first = prices[0];
+      const trend = last < first ? "down" : last > first ? "up" : "flat";
+      return `<svg class="spark-svg trend-${trend}" viewBox="0 0 ${w} ${h}" width="${w}" height="${h}" preserveAspectRatio="none"><polyline points="${coords.join(" ")}" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+    }
+
+    async function loadSparklines() {
+      const ids = state.stations.map((s) => s.id).filter(Boolean);
+      if (ids.length === 0) return;
+      try {
+        const params = new URLSearchParams({ stationIds: ids.join(","), days: "7" });
+        const res = await fetch(`/api/history?${params}`);
+        if (!res.ok) return;
+        const body = await res.json();
+        const data = body.stations || {};
+        for (const s of state.stations) {
+          const bucket = data[s.id];
+          if (!bucket) continue;
+          for (const fuel of ["e5", "e10", "diesel"]) {
+            const el = document.getElementById(`spark-${s.id}-${fuel}`);
+            if (el) el.innerHTML = renderSparkline(bucket[fuel]);
+          }
+        }
+      } catch {
+        // sparklines are best-effort
+      }
     }
 
     function render() {
@@ -197,17 +241,20 @@
 
       const arrow = (c) => state.sort.col === c ? (state.sort.dir === "asc" ? "↑" : "↓") : "";
 
+      const fmtDist = (d) => (typeof d === "number" && Number.isFinite(d) ? d.toFixed(1) : "?");
+      const postCode = (p) => (typeof p === "number" && p > 0 ? p : "");
+
       const rows = sorted.map((s) => `
         <tr class="${s.isOpen ? "" : "closed"}">
           <td>
             <div><strong>${escapeHtml(s.name)}</strong></div>
-            <div class="dist">${escapeHtml(s.brand || "")} · ${escapeHtml(s.street)} ${escapeHtml(s.houseNumber || "")}, ${s.postCode} ${escapeHtml(s.place)}</div>
+            <div class="dist">${escapeHtml(s.brand || "")} · ${escapeHtml(s.street)} ${escapeHtml(s.houseNumber || "")}, ${postCode(s.postCode)} ${escapeHtml(s.place)}</div>
           </td>
           <td><span class="badge ${s.isOpen ? "open" : "closed"}">${s.isOpen ? "open" : "closed"}</span></td>
-          ${priceCell(s.e5, cheapest.e5)}
-          ${priceCell(s.e10, cheapest.e10)}
-          ${priceCell(s.diesel, cheapest.diesel)}
-          <td class="dist">${s.dist.toFixed(1)} km</td>
+          ${priceCell(s.e5, cheapest.e5, s.id, "e5")}
+          ${priceCell(s.e10, cheapest.e10, s.id, "e10")}
+          ${priceCell(s.diesel, cheapest.diesel, s.id, "diesel")}
+          <td class="dist">${fmtDist(s.dist)} km</td>
         </tr>
       `).join("");
 
@@ -239,6 +286,8 @@
           render();
         });
       }
+
+      loadSparklines();
     }
 
     function escapeHtml(s) {
@@ -254,13 +303,17 @@
       const fuel = $("fuel").value;
 
       savePrefs({ lat, lng, radius, fuel });
-      state.fuel = fuel;
+
+      if (state.inflight) state.inflight.abort();
+      const controller = new AbortController();
+      state.inflight = controller;
 
       setStatus("fetching…");
       const params = new URLSearchParams({ lat, lng, radius, type: fuel });
       try {
-        const res = await fetch(`/api/stations?${params}`);
+        const res = await fetch(`/api/stations?${params}`, { signal: controller.signal });
         const body = await res.json();
+        if (state.inflight !== controller) return;
         if (!res.ok) {
           state.stations = [];
           $("result").innerHTML = `<div class="error">Error: ${escapeHtml(body.error ?? res.status)}</div>`;
@@ -274,8 +327,11 @@
         render();
         scheduleNext();
       } catch (err) {
+        if (err.name === "AbortError") return;
         setStatus("network error", "err");
         $("result").innerHTML = `<div class="error">Network error: ${escapeHtml(err.message ?? err)}</div>`;
+      } finally {
+        if (state.inflight === controller) state.inflight = null;
       }
     }
 
