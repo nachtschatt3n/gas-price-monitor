@@ -98,7 +98,11 @@ Every push to `main` builds an `linux/amd64` image and publishes it to
 `ghcr.io/nachtschatt3n/gas-price-monitor` via `.github/workflows/build.yml`.
 Tags: `latest` (main HEAD), `sha-<short>` (per commit), `v<tag>` (on git tags).
 
-Deployment manifests live in [`k8s/`](k8s/README.md). TL;DR:
+For the `cberg-home-nextgen` homelab, the rollout is owned by the
+`cluster-ops-agent` in that gitops repo (Flux reconciliation, no manual
+kubectl). See [`CLAUDE.md`](CLAUDE.md) for the full handoff. The manifests
+in [`k8s/`](k8s/README.md) are reference templates for anyone running this
+elsewhere:
 
 ```sh
 kubectl create secret generic gas-price-monitor --from-literal=api-key=YOUR_KEY

@@ -1,5 +1,14 @@
 # Kubernetes deployment
 
+> **Note:** for the `cberg-home-nextgen` homelab, these files are reference
+> templates only. Production rollout is owned by the `cluster-ops-agent` in
+> the `cberg-home-nextgen` gitops repo and lands via Flux reconciliation —
+> not via `kubectl apply` from here. See [`../CLAUDE.md`](../CLAUDE.md) for
+> the full deployment workflow.
+>
+> The instructions below apply if you're standing this up on a different
+> cluster (or for a one-off test deploy).
+
 Manifests for running gas-price-monitor on a Kubernetes cluster. Image is
 built by `.github/workflows/build.yml` and published to
 `ghcr.io/nachtschatt3n/gas-price-monitor` on every push to `main` (tagged
