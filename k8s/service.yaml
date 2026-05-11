@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: gas-price-monitor
+  labels:
+    app: gas-price-monitor
+spec:
+  type: ClusterIP
+  selector:
+    app: gas-price-monitor
+  ports:
+    - name: http
+      port: 80
+      targetPort: http

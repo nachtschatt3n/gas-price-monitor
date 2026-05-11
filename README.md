@@ -92,6 +92,24 @@ served by Bun, with a tiny proxy endpoint so the API key stays on the server.
 
 Invalid env values cause the server to exit at startup with a clear message.
 
+## Container / Kubernetes
+
+Every push to `main` builds an `linux/amd64` image and publishes it to
+`ghcr.io/nachtschatt3n/gas-price-monitor` via `.github/workflows/build.yml`.
+Tags: `latest` (main HEAD), `sha-<short>` (per commit), `v<tag>` (on git tags).
+
+Deployment manifests live in [`k8s/`](k8s/README.md). TL;DR:
+
+```sh
+kubectl create secret generic gas-price-monitor --from-literal=api-key=YOUR_KEY
+kubectl apply -f k8s/deployment.yaml -f k8s/service.yaml
+kubectl port-forward svc/gas-price-monitor 3000:80
+```
+
+State is ephemeral (`emptyDir` for `/data` and `/cache`) — pod restarts wipe
+history. Swap to a `persistentVolumeClaim` in `deployment.yaml` if you want it
+to survive.
+
 ## License
 
 Code: do what you want.
