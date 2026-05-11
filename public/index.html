@@ -1,0 +1,312 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Gas Price Monitor</title>
+  <style>
+    :root {
+      --bg: #0f1115;
+      --panel: #181b22;
+      --panel-2: #1f232c;
+      --border: #2a2f3a;
+      --text: #e8eaed;
+      --muted: #8a92a3;
+      --accent: #4ade80;
+      --warn: #f59e0b;
+      --err: #ef4444;
+      --closed: #5b6170;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; background: var(--bg); color: var(--text);
+      font: 14px/1.45 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
+    header { padding: 20px 24px; border-bottom: 1px solid var(--border); display: flex;
+      align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; }
+    h1 { margin: 0; font-size: 18px; font-weight: 600; }
+    .status { font-size: 12px; color: var(--muted); }
+    .status .ok { color: var(--accent); }
+    .status .err { color: var(--err); }
+    main { padding: 20px 24px; max-width: 1200px; margin: 0 auto; }
+    .controls { background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+      padding: 16px; display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+      gap: 12px; margin-bottom: 20px; align-items: end; }
+    .field { display: flex; flex-direction: column; gap: 4px; }
+    label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); }
+    input, select { background: var(--panel-2); border: 1px solid var(--border); color: var(--text);
+      padding: 8px 10px; border-radius: 6px; font: inherit; }
+    input:focus, select:focus { outline: none; border-color: var(--accent); }
+    button { background: var(--panel-2); border: 1px solid var(--border); color: var(--text);
+      padding: 8px 14px; border-radius: 6px; cursor: pointer; font: inherit; }
+    button:hover { border-color: var(--accent); }
+    button.primary { background: var(--accent); color: #0a0d11; border-color: var(--accent); font-weight: 600; }
+    button.primary:hover { filter: brightness(1.1); }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+    .actions { display: flex; gap: 8px; }
+    table { width: 100%; border-collapse: collapse; background: var(--panel); border: 1px solid var(--border);
+      border-radius: 8px; overflow: hidden; }
+    th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--border); }
+    th { background: var(--panel-2); font-size: 11px; text-transform: uppercase;
+      letter-spacing: 0.05em; color: var(--muted); cursor: pointer; user-select: none; white-space: nowrap; }
+    th:hover { color: var(--text); }
+    th .arrow { opacity: 0.5; margin-left: 4px; }
+    tbody tr:last-child td { border-bottom: none; }
+    tbody tr.closed { opacity: 0.45; }
+    .price { font-variant-numeric: tabular-nums; font-weight: 600; }
+    .price.cheap { color: var(--accent); }
+    .price.na { color: var(--muted); font-weight: 400; }
+    .dist { color: var(--muted); font-variant-numeric: tabular-nums; }
+    .badge { display: inline-block; padding: 2px 6px; border-radius: 4px; font-size: 10px;
+      text-transform: uppercase; letter-spacing: 0.05em; }
+    .badge.open { background: rgba(74, 222, 128, 0.15); color: var(--accent); }
+    .badge.closed { background: rgba(91, 97, 112, 0.2); color: var(--closed); }
+    .empty, .error { padding: 40px 20px; text-align: center; color: var(--muted); }
+    .error { color: var(--err); }
+    .footer { margin-top: 24px; font-size: 11px; color: var(--muted); text-align: center; }
+    .footer a { color: var(--muted); }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>⛽ Gas Price Monitor</h1>
+    <div class="status" id="status">loading…</div>
+  </header>
+  <main>
+    <form class="controls" id="controls">
+      <div class="field">
+        <label for="lat">Latitude</label>
+        <input id="lat" type="number" step="any" required />
+      </div>
+      <div class="field">
+        <label for="lng">Longitude</label>
+        <input id="lng" type="number" step="any" required />
+      </div>
+      <div class="field">
+        <label for="radius">Radius (km)</label>
+        <input id="radius" type="number" min="1" max="25" step="1" required />
+      </div>
+      <div class="field">
+        <label for="fuel">Fuel</label>
+        <select id="fuel">
+          <option value="all">All</option>
+          <option value="e5">E5</option>
+          <option value="e10">E10</option>
+          <option value="diesel">Diesel</option>
+        </select>
+      </div>
+      <div class="actions">
+        <button type="button" id="locate">📍 Locate me</button>
+        <button type="submit" class="primary">Refresh</button>
+      </div>
+    </form>
+
+    <div id="result"></div>
+
+    <div class="footer">
+      Data: <a href="https://creativecommons.tankerkoenig.de/" target="_blank" rel="noopener">Tankerkönig (CC BY 4.0)</a>
+      · Auto-refresh every 5 min · <span id="last-fetch">never</span>
+    </div>
+  </main>
+
+  <script type="module">
+    const $ = (id) => document.getElementById(id);
+    const STORAGE_KEY = "gas-monitor-prefs";
+    const REFRESH_MS = 5 * 60 * 1000;
+
+    const state = {
+      sort: { col: "dist", dir: "asc" },
+      stations: [],
+      fuel: "all",
+      refreshTimer: null,
+    };
+
+    function loadPrefs() {
+      try {
+        return JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "{}");
+      } catch {
+        return {};
+      }
+    }
+    function savePrefs(p) {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(p));
+    }
+
+    async function init() {
+      const cfg = await fetch("/api/config").then((r) => r.json());
+      const prefs = loadPrefs();
+      $("lat").value = prefs.lat ?? cfg.defaultLat;
+      $("lng").value = prefs.lng ?? cfg.defaultLng;
+      $("radius").value = prefs.radius ?? cfg.defaultRadius;
+      $("fuel").value = prefs.fuel ?? "all";
+      if (!cfg.hasApiKey) {
+        setStatus("⚠ No API key configured on server", "err");
+      }
+      await refresh();
+    }
+
+    function setStatus(text, cls = "") {
+      const el = $("status");
+      el.textContent = text;
+      el.className = "status " + cls;
+    }
+
+    function formatPrice(p) {
+      if (p === false || p === 0 || p == null) {
+        return '<span class="price na">—</span>';
+      }
+      return `<span class="price">${p.toFixed(3)} €</span>`;
+    }
+
+    function priceCell(p, cheapest) {
+      if (p === false || p === 0 || p == null) {
+        return '<td><span class="price na">—</span></td>';
+      }
+      const cls = (cheapest != null && p === cheapest) ? "price cheap" : "price";
+      return `<td><span class="${cls}">${p.toFixed(3)} €</span></td>`;
+    }
+
+    function render() {
+      const result = $("result");
+      if (!state.stations.length) {
+        result.innerHTML = '<div class="empty">No stations found. Try a larger radius.</div>';
+        return;
+      }
+
+      const cheapest = { e5: Infinity, e10: Infinity, diesel: Infinity };
+      for (const s of state.stations) {
+        if (s.isOpen) {
+          for (const k of ["e5", "e10", "diesel"]) {
+            if (typeof s[k] === "number" && s[k] > 0 && s[k] < cheapest[k]) cheapest[k] = s[k];
+          }
+        }
+      }
+      for (const k of Object.keys(cheapest)) {
+        if (!Number.isFinite(cheapest[k])) cheapest[k] = null;
+      }
+
+      const sorted = [...state.stations].sort((a, b) => {
+        const { col, dir } = state.sort;
+        const av = a[col];
+        const bv = b[col];
+        const an = (av === false || av == null) ? Infinity : av;
+        const bn = (bv === false || bv == null) ? Infinity : bv;
+        if (typeof an === "string" || typeof bn === "string") {
+          return dir === "asc" ? String(an).localeCompare(String(bn)) : String(bn).localeCompare(String(an));
+        }
+        return dir === "asc" ? an - bn : bn - an;
+      });
+
+      const arrow = (c) => state.sort.col === c ? (state.sort.dir === "asc" ? "↑" : "↓") : "";
+
+      const rows = sorted.map((s) => `
+        <tr class="${s.isOpen ? "" : "closed"}">
+          <td>
+            <div><strong>${escapeHtml(s.name)}</strong></div>
+            <div class="dist">${escapeHtml(s.brand || "")} · ${escapeHtml(s.street)} ${escapeHtml(s.houseNumber || "")}, ${s.postCode} ${escapeHtml(s.place)}</div>
+          </td>
+          <td><span class="badge ${s.isOpen ? "open" : "closed"}">${s.isOpen ? "open" : "closed"}</span></td>
+          ${priceCell(s.e5, cheapest.e5)}
+          ${priceCell(s.e10, cheapest.e10)}
+          ${priceCell(s.diesel, cheapest.diesel)}
+          <td class="dist">${s.dist.toFixed(1)} km</td>
+        </tr>
+      `).join("");
+
+      result.innerHTML = `
+        <table>
+          <thead>
+            <tr>
+              <th data-col="name">Station <span class="arrow">${arrow("name")}</span></th>
+              <th data-col="isOpen">Status <span class="arrow">${arrow("isOpen")}</span></th>
+              <th data-col="e5">E5 <span class="arrow">${arrow("e5")}</span></th>
+              <th data-col="e10">E10 <span class="arrow">${arrow("e10")}</span></th>
+              <th data-col="diesel">Diesel <span class="arrow">${arrow("diesel")}</span></th>
+              <th data-col="dist">Distance <span class="arrow">${arrow("dist")}</span></th>
+            </tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
+      `;
+
+      for (const th of result.querySelectorAll("th[data-col]")) {
+        th.addEventListener("click", () => {
+          const col = th.dataset.col;
+          if (state.sort.col === col) {
+            state.sort.dir = state.sort.dir === "asc" ? "desc" : "asc";
+          } else {
+            state.sort.col = col;
+            state.sort.dir = "asc";
+          }
+          render();
+        });
+      }
+    }
+
+    function escapeHtml(s) {
+      return String(s).replace(/[&<>"']/g, (c) => ({
+        "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+      })[c]);
+    }
+
+    async function refresh() {
+      const lat = $("lat").value;
+      const lng = $("lng").value;
+      const radius = $("radius").value;
+      const fuel = $("fuel").value;
+
+      savePrefs({ lat, lng, radius, fuel });
+      state.fuel = fuel;
+
+      setStatus("fetching…");
+      const params = new URLSearchParams({ lat, lng, radius, type: fuel });
+      try {
+        const res = await fetch(`/api/stations?${params}`);
+        const body = await res.json();
+        if (!res.ok) {
+          state.stations = [];
+          $("result").innerHTML = `<div class="error">Error: ${escapeHtml(body.error ?? res.status)}</div>`;
+          setStatus(`error ${res.status}`, "err");
+          return;
+        }
+        state.stations = body.stations ?? [];
+        const ts = new Date(body.fetchedAt);
+        $("last-fetch").textContent = `updated ${ts.toLocaleTimeString()}`;
+        setStatus(`${state.stations.length} stations`, "ok");
+        render();
+        scheduleNext();
+      } catch (err) {
+        setStatus("network error", "err");
+        $("result").innerHTML = `<div class="error">Network error: ${escapeHtml(err.message ?? err)}</div>`;
+      }
+    }
+
+    function scheduleNext() {
+      if (state.refreshTimer) clearTimeout(state.refreshTimer);
+      state.refreshTimer = setTimeout(refresh, REFRESH_MS);
+    }
+
+    $("controls").addEventListener("submit", (e) => {
+      e.preventDefault();
+      refresh();
+    });
+
+    $("locate").addEventListener("click", () => {
+      if (!navigator.geolocation) {
+        setStatus("geolocation unavailable", "err");
+        return;
+      }
+      setStatus("locating…");
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          $("lat").value = pos.coords.latitude.toFixed(5);
+          $("lng").value = pos.coords.longitude.toFixed(5);
+          refresh();
+        },
+        (err) => setStatus("geolocation: " + err.message, "err"),
+        { enableHighAccuracy: false, timeout: 10000 },
+      );
+    });
+
+    init();
+  </script>
+</body>
+</html>
