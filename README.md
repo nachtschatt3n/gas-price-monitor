@@ -42,22 +42,55 @@ served by Bun, with a tiny proxy endpoint so the API key stays on the server.
 - Picks the cheapest open station for each fuel grade (highlighted in green).
 - Auto-refreshes every 5 minutes (the Tankerkönig fair-use limit).
 - Settings are saved to `localStorage`.
+- Each price cell shows a 7-day sparkline once history has accumulated. Green
+  trend = falling, red trend = rising, gray = flat. Data persists in
+  `data/history.jsonl`.
+- Optional price-drop alerts: set `ALERT_E5_BELOW`, `ALERT_E10_BELOW`, or
+  `ALERT_DIESEL_BELOW` in `.env`. Alerts fire once per crossing-below (debounced
+  via a state file). Configure `ALERT_DESKTOP_NOTIFY=true` for `notify-send`
+  pop-ups, or `ALERT_WEBHOOK_URL` for an HTTP POST.
 
 ## Endpoints
 
 - `GET /` — dashboard
-- `GET /api/config` — returns server defaults + whether the API key is set
+- `GET /api/config` — server defaults + flags (`hasApiKey`, `alertsEnabled`)
 - `GET /api/stations?lat=&lng=&radius=&type=` — proxies Tankerkönig's
-  `list.php`. `type` is `e5`, `e10`, `diesel`, or `all`.
+  `list.php` with server-side 5min disk caching. `type` is `e5`, `e10`,
+  `diesel`, or `all`.
+- `GET /api/history?stationIds=A,B,C&days=7` — historical prices for each
+  requested station, grouped by fuel. Up to 50 stationIds per call.
 
 ## Notes
 
 - Tankerkönig terms ask you to cache responses for at least 5 minutes in
-  production. The dashboard's auto-refresh respects this; if you script
-  against `/api/stations` directly, please do the same.
-- Radius is clamped to 1–25 km.
+  production. The server has a built-in 5-minute disk cache (in `.cache/`) and
+  also auto-refreshes the dashboard on that cadence, so any client reads stay
+  inside the fair-use envelope.
+- Radius must be between 1 and 25 km — out-of-range values return HTTP 400.
 - This is a personal/local tool — there's no auth on the server. Don't expose
   it to the open internet without putting something in front of it.
+
+## Configuration
+
+| Env var | Default | Notes |
+|---------|---------|-------|
+| `TANKERKOENIG_API_KEY` | — | Required. |
+| `PORT` | `3000` | 1–65535. |
+| `DEFAULT_LAT` | `52.5200` | Berlin Mitte. |
+| `DEFAULT_LNG` | `13.4050` | |
+| `DEFAULT_RADIUS` | `5` | 1–25 km. |
+| `CACHE_DIR` | `.cache` (in repo) | Disk cache location. |
+| `CACHE_TTL_MS` | `300000` (5 min) | |
+| `CACHE_MAX_ENTRIES` | `200` | LRU pruned on write. |
+| `DATA_DIR` | `data` (in repo) | Where `history.jsonl` and `alerts-state.json` live. |
+| `HISTORY_MAX_FILE_BYTES` | `52428800` (50 MB) | Rotates `history.jsonl` → `history.N.jsonl` when exceeded. |
+| `ALERT_E5_BELOW` | — | Threshold (€/L). Fires alert when cheapest open E5 crosses below. |
+| `ALERT_E10_BELOW` | — | Same, for E10. |
+| `ALERT_DIESEL_BELOW` | — | Same, for Diesel. |
+| `ALERT_DESKTOP_NOTIFY` | `false` | `true` to send `notify-send` desktop popups (Linux). |
+| `ALERT_WEBHOOK_URL` | — | If set, POSTs `{fuel, threshold, price, stationId, ts}` JSON on each alert. |
+
+Invalid env values cause the server to exit at startup with a clear message.
 
 ## License
 
