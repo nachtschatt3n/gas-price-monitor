@@ -74,6 +74,49 @@
     .error { color: var(--err); }
     .footer { margin-top: 24px; font-size: 11px; color: var(--muted); text-align: center; }
     .footer a { color: var(--muted); }
+
+    /* Mobile: collapse 6-col table into card-per-station grid */
+    @media (max-width: 640px) {
+      header { padding: 16px; }
+      main { padding: 16px 12px; }
+      .controls { padding: 12px; gap: 10px; }
+      .actions { grid-column: 1 / -1; }
+
+      table { background: transparent; border: none; border-radius: 0; overflow: visible; }
+      thead { display: none; }
+      tbody, tr, td { display: block; }
+      tr {
+        background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+        padding: 12px 12px 10px; margin-bottom: 10px;
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        grid-template-areas:
+          "name status"
+          "e5 e10"
+          "diesel diesel"
+          "dist dist";
+        column-gap: 12px; row-gap: 10px;
+      }
+      tbody tr:last-child { margin-bottom: 0; }
+      tr > td { padding: 0; border: none; }
+      tr > td:nth-of-type(1) { grid-area: name; }
+      tr > td:nth-of-type(2) { grid-area: status; text-align: right; align-self: start; }
+      tr > td:nth-of-type(3) { grid-area: e5; }
+      tr > td:nth-of-type(4) { grid-area: e10; }
+      tr > td:nth-of-type(5) { grid-area: diesel; }
+      tr > td:nth-of-type(6) { grid-area: dist; color: var(--muted); font-size: 11px; }
+
+      /* Add tiny fuel labels above each price on mobile */
+      tr > td:nth-of-type(3)::before { content: "E5"; }
+      tr > td:nth-of-type(4)::before { content: "E10"; }
+      tr > td:nth-of-type(5)::before { content: "DIESEL"; }
+      tr > td:nth-of-type(3)::before,
+      tr > td:nth-of-type(4)::before,
+      tr > td:nth-of-type(5)::before {
+        display: block; font-size: 10px; color: var(--muted);
+        text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 2px;
+      }
+    }
   </style>
 </head>
 <body>
