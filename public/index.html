@@ -73,7 +73,9 @@
     .empty, .error { padding: 40px 20px; text-align: center; color: var(--muted); }
     .error { color: var(--err); }
     .footer { margin-top: 24px; font-size: 11px; color: var(--muted); text-align: center; }
-    .footer a { color: var(--muted); }
+    .footer a { color: var(--muted); text-decoration: underline; text-underline-offset: 2px;
+      text-decoration-color: var(--border); }
+    .footer a:hover { text-decoration-color: var(--accent); color: var(--text); }
 
     /* Mobile: collapse 6-col table into card-per-station grid */
     @media (max-width: 640px) {
