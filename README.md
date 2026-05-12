@@ -20,7 +20,7 @@ The screenshot is captured from the deterministic Playwright test server, so it
 shows a realistic UI state without using live API keys.
 
 <p align="center">
-  <img src="docs/desktop.png?v=2" alt="Desktop Gas Price Monitor dashboard with all fuels and best value column" width="100%">
+  <img src="docs/dashboard.png" alt="Desktop Gas Price Monitor dashboard with all fuels and best value column" width="100%">
 </p>
 
 ## Features
