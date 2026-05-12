@@ -113,6 +113,7 @@ function stationsFor(scenario: string): MockStation[] {
 }
 
 let currentScenario = "default";
+let currentOsrmScenario = "default"; // "default" | "osrm-down" | "no-route"
 
 const PHOTON_FEATURES_BERLIN = {
   type: "FeatureCollection",
@@ -132,6 +133,45 @@ const PHOTON_FEATURES_BERLIN = {
 
 const PHOTON_EMPTY = { type: "FeatureCollection", features: [] };
 
+// OSRM mock — scenario-driven so tests can exercise pending/error/no-route.
+function osrmTableResponse(stationCount: number): unknown {
+  if (currentOsrmScenario === "osrm-down") {
+    return { __status: 500, body: "boom" };
+  }
+  const distances = Array.from({ length: stationCount }, (_, i) => {
+    if (currentOsrmScenario === "no-route" && i === 0) return null;
+    return 1000 + i * 500;
+  });
+  const durations = Array.from({ length: stationCount }, (_, i) => {
+    if (currentOsrmScenario === "no-route" && i === 0) return null;
+    return 120 + i * 60;
+  });
+  return { code: "Ok", distances: [distances], durations: [durations] };
+}
+
+function osrmRouteResponse(): unknown {
+  if (currentOsrmScenario === "osrm-down") {
+    return { __status: 500, body: "boom" };
+  }
+  return {
+    code: "Ok",
+    routes: [
+      {
+        geometry: {
+          type: "LineString",
+          coordinates: [
+            [13.405, 52.52],
+            [13.408, 52.5205],
+            [13.41, 52.521],
+          ],
+        },
+        distance: 800,
+        duration: 90,
+      },
+    ],
+  };
+}
+
 const mockFetch = (async (input: unknown) => {
   const url = typeof input === "string" ? input : (input as { url?: string })?.url ?? "";
   if (url.includes("photon.test")) {
@@ -149,6 +189,32 @@ const mockFetch = (async (input: unknown) => {
       status: 200,
       headers: { "Content-Type": "application/json" },
     });
+  }
+  if (url.includes("osrm.test")) {
+    // Count station coords from the URL — coords are semicolon-separated.
+    // Path: /table/v1/driving/{lng,lat;lng,lat;...}?...
+    if (url.includes("/table/v1/")) {
+      const path = new URL(url).pathname;
+      const coordsPart = path.split("/table/v1/driving/")[1] ?? "";
+      const coords = coordsPart.split(";").filter(Boolean);
+      const stationCount = Math.max(0, coords.length - 1); // first is user
+      const body = osrmTableResponse(stationCount);
+      const wrapper = body as { __status?: number; body?: string };
+      if (wrapper.__status) return new Response(wrapper.body ?? "", { status: wrapper.__status });
+      return new Response(JSON.stringify(body), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+    if (url.includes("/route/v1/")) {
+      const body = osrmRouteResponse();
+      const wrapper = body as { __status?: number; body?: string };
+      if (wrapper.__status) return new Response(wrapper.body ?? "", { status: wrapper.__status });
+      return new Response(JSON.stringify(body), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
   }
   // Tankerkönig stations — scenario-driven for the Best Value tests.
   const requestedType = new URL(url).searchParams.get("type");
@@ -169,6 +235,8 @@ const env = parseEnv(
     TANKERKOENIG_API_KEY: "e2e-test-key",
     PHOTON_USER_AGENT: "gas-price-monitor (e2e)",
     PHOTON_BASE_URL: "https://photon.test",
+    OSRM_USER_AGENT: "gas-price-monitor (e2e)",
+    OSRM_BASE_URL: "https://osrm.test",
   },
   PUBLIC_DIR,
   CACHE_DIR,
@@ -221,6 +289,7 @@ Bun.serve({
       // Bust the station cache so the next /api/stations call hits the fresh scenario data.
       const fs = await import("node:fs/promises");
       await fs.rm(join(CACHE_DIR, "geocode"), { recursive: true, force: true }).catch(() => {});
+      await fs.rm(join(CACHE_DIR, "osrm"), { recursive: true, force: true }).catch(() => {});
       const files = await fs.readdir(CACHE_DIR).catch(() => [] as string[]);
       await Promise.all(
         files
@@ -228,6 +297,17 @@ Bun.serve({
           .map((f) => fs.unlink(join(CACHE_DIR, f)).catch(() => {})),
       );
       return new Response(JSON.stringify({ scenario: name }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+    // Test-only OSRM scenario control endpoint.
+    if (url.pathname === "/test/osrm-scenario") {
+      const name = url.searchParams.get("name") ?? "default";
+      currentOsrmScenario = name;
+      const fs = await import("node:fs/promises");
+      await fs.rm(join(CACHE_DIR, "osrm"), { recursive: true, force: true }).catch(() => {});
+      return new Response(JSON.stringify({ osrmScenario: name }), {
         status: 200,
         headers: { "Content-Type": "application/json" },
       });
