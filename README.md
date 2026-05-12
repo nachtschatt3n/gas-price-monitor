@@ -27,14 +27,20 @@ shows a realistic UI state without using live API keys.
 
 - Location search for German places, streets, and postal codes via
   [Photon](https://photon.komoot.io/) / OpenStreetMap.
-- Browser geolocation support for "near me" searches.
+- **Interactive map** (vendored [Leaflet](https://leafletjs.com/)) showing
+  the search location, all stations, and the driving route to a clicked
+  station.
+- **"📍 Use my location"** button using browser geolocation.
+- **Real driving distance** for the Best Value calc via
+  [OSRM](https://project-osrm.org/) (Open Source Routing Machine).
 - Fuel filters for `All`, `E5`, `E10`, and `Diesel`.
 - Cheapest open station highlighting per fuel.
-- **Best Value** calculation that combines fuel price, fill volume, station
-  distance, and vehicle consumption into net `€/fill`.
+- **Best Value** calculation that combines fuel price, fill volume, real
+  driving distance, and vehicle consumption into net `€/fill`.
 - Sortable desktop table and mobile station cards.
 - 7-day price sparklines backed by local `data/history.jsonl`.
-- Server-side 5-minute Tankerkönig cache and 24-hour geocoder cache.
+- Server-side 5-minute Tankerkönig cache, 24-hour geocoder cache, and
+  7-day OSRM driving-distance cache.
 - Optional desktop or webhook alerts when prices cross configured thresholds.
 - Docker image publishing to GitHub Container Registry.
 
@@ -63,10 +69,14 @@ Edit `.env` and set:
 ```sh
 TANKERKOENIG_API_KEY=your-key
 PHOTON_USER_AGENT=gas-price-monitor (you@example.com)
+OSRM_USER_AGENT=gas-price-monitor (you@example.com)
 ```
 
-`PHOTON_USER_AGENT` is required. Use an identifier with a contact address so the
-Photon operator can reach you if your geocoder traffic misbehaves.
+`PHOTON_USER_AGENT` and `OSRM_USER_AGENT` are required. Use identifiers with a
+contact address so the Photon / OSRM operators can reach you if your traffic
+misbehaves. Optionally set `STADIA_API_KEY` (free tier at
+<https://stadiamaps.com/>) for nicer dark-mode tiles; without it, OSM raw
+tiles are used as a fallback.
 
 Run the app:
 
@@ -106,6 +116,11 @@ bun run start
 | `PHOTON_BASE_URL` | `https://photon.komoot.io` | Override for tests or self-hosted Photon. |
 | `GEOCODE_CACHE_TTL_MS` | `86400000` | 24-hour geocoder cache. |
 | `GEOCODE_CACHE_MAX_ENTRIES` | `200` | LRU pruned on write. |
+| `OSRM_USER_AGENT` | | Required. Sent to OSRM routing service. |
+| `OSRM_BASE_URL` | `https://router.project-osrm.org` | Override to point at self-hosted OSRM. |
+| `OSRM_CACHE_TTL_MS` | `604800000` | 7-day driving-distance cache. |
+| `OSRM_CACHE_MAX_ENTRIES` | `500` | LRU pruned on write. |
+| `STADIA_API_KEY` | | Optional. Stadia Maps tile-provider key; without it OSM tiles are used. |
 | `PORT` | `3000` | HTTP server port. |
 | `DEFAULT_LAT` | `52.5200` | Default center, Berlin Mitte. |
 | `DEFAULT_LNG` | `13.4050` | Default center, Berlin Mitte. |
@@ -132,6 +147,8 @@ Invalid environment values fail fast at startup with a clear error.
 | `GET /api/stations?lat=&lng=&radius=&type=` | Proxies Tankerkönig `list.php` with disk caching. `type` is `e5`, `e10`, `diesel`, or `all`. |
 | `GET /api/geocode?q=...` | Returns up to 5 Photon geocoder results as `{ label, lat, lng }`. |
 | `GET /api/history?stationIds=A,B,C&days=7` | Returns grouped historical prices for up to 50 station IDs. |
+| `POST /api/distances` | Batch driving distances from a user coord to up to 50 station coords via OSRM `/table`. Body: `{userLat, userLng, stations:[{id,lat,lng},...]}`. |
+| `GET /api/route?fromLat=&fromLng=&toLat=&toLng=` | Single driving route polyline + meters + seconds via OSRM `/route`. |
 
 `radius` must be between 1 and 25 km. Out-of-range values return HTTP 400.
 
@@ -180,6 +197,12 @@ For the `cberg-home-nextgen` homelab, Flux rollout ownership is documented in
 ## Data and License
 
 Fuel price data comes from Tankerkönig and is licensed under CC BY 4.0. Photon
-geocoding uses OpenStreetMap data under ODbL.
+geocoding uses OpenStreetMap data under ODbL. OSRM routing also uses
+OpenStreetMap data. Map tiles come from either Stadia Maps (when
+`STADIA_API_KEY` is set) or OpenStreetMap raw tiles (fallback).
+
+The bundled [Leaflet](https://leafletjs.com/) library is vendored at
+`public/lib/leaflet.{js,css}` under the BSD-2-Clause license; see
+`public/lib/LICENSE.leaflet`.
 
 Project code: do what you want.

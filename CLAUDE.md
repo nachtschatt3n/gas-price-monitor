@@ -92,8 +92,11 @@ carries the `Co-Authored-By` trailer.
 1. **Single replica only.** The cache is local disk. Two replicas means
    two caches and twice the upstream API hits. Tankerkönig asks for a
    5-minute cache; violating that risks getting the API key throttled
-   or banned. If you ever want HA, you need a shared cache backend
-   (Redis or similar) first.
+   or banned. The 7-day **OSRM cache** at `${CACHE_DIR}/osrm/` extends
+   the same constraint — two replicas means two OSRM caches and two
+   hits to the public-demo OSRM instance per novel coord pair. If you
+   ever want HA, you need a shared cache backend (Redis or similar)
+   first.
 
 2. **5-minute cache is non-negotiable in production.** Default
    `CACHE_TTL_MS` is 300000 (5 min). The schema allows lower values for
@@ -106,12 +109,28 @@ carries the `Co-Authored-By` trailer.
    **Override 2026-05-12:** rule deliberately broken — owner chose to
    expose publicly without auth or rate limiting. Known risks:
    Tankerkönig key may be banned by the operator under fair-use; Photon
-   (komoot) may flag the User-Agent for excessive traffic; no abuse
-   protection on `/api/stations`, `/api/geocode`, or `/api/history`.
+   (komoot) may flag the User-Agent for excessive traffic; OSRM public
+   demo instance explicitly states "small-scale use only" and may
+   throttle or block traffic; no abuse protection on `/api/stations`,
+   `/api/geocode`, `/api/history`, `/api/distances`, or `/api/route`.
    Mitigation if it bites: rotate `TANKERKOENIG_API_KEY`, change
-   `PHOTON_USER_AGENT`, optionally retreat the Ingress to internal-only.
+   `PHOTON_USER_AGENT` / `OSRM_USER_AGENT`, point `OSRM_BASE_URL` at a
+   self-hosted instance, optionally retreat the Ingress to internal-only.
    Re-evaluate this override if traffic ever exceeds what one person
    refueling produces.
+
+7. **Tile + routing attribution is a legal floor.** Stadia Maps + OSM +
+   OSRM all require visible attribution on the map UI. The Leaflet
+   attribution control IS the binding surface — keep `--muted` text on
+   `--panel-2` background and verify WCAG AA contrast on any palette
+   change. The footer carries duplicate attribution that's visible
+   even before the map loads. Don't override `.leaflet-control-attribution`
+   to be invisible.
+
+8. **OSRM coord syntax is `lng,lat`, not `lat,lng`.** OSRM follows
+   GeoJSON convention. Sources/destinations use a 1×N matrix
+   (`?sources=0&destinations=1,...,N`) to avoid the (N+1)² blowup.
+   The `OsrmClient` enforces this — don't reach around it.
 
 4. **State is ephemeral in containers.** The k8s Deployment uses
    `emptyDir` for both `/cache` and `/data`. Pod restart wipes history
