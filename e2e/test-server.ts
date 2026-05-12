@@ -151,7 +151,14 @@ const mockFetch = (async (input: unknown) => {
     });
   }
   // Tankerkönig stations — scenario-driven for the Best Value tests.
-  return new Response(JSON.stringify({ ok: true, stations: stationsFor(currentScenario) }), {
+  const requestedType = new URL(url).searchParams.get("type");
+  const stations = stationsFor(currentScenario).map((station) => {
+    if (requestedType === "e5" || requestedType === "e10" || requestedType === "diesel") {
+      return { ...station, price: station[requestedType] };
+    }
+    return station;
+  });
+  return new Response(JSON.stringify({ ok: true, stations }), {
     status: 200,
     headers: { "Content-Type": "application/json" },
   });
@@ -197,8 +204,13 @@ for (let i = 6; i >= 0; i--) {
 }
 await Bun.write(join(DATA_DIR, "history.jsonl"), seedLines.join("\n") + "\n");
 
+const PORT = Number(process.env.PORT ?? 3457);
+if (!Number.isFinite(PORT) || PORT < 1 || PORT > 65535) {
+  throw new Error(`Invalid PORT: ${process.env.PORT}`);
+}
+
 Bun.serve({
-  port: 3457,
+  port: PORT,
   routes: app.routes,
   async fetch(req) {
     const url = new URL(req.url);
@@ -224,4 +236,4 @@ Bun.serve({
   },
 });
 
-console.log("e2e test server listening on http://localhost:3457");
+console.log(`e2e test server listening on http://localhost:${PORT}`);

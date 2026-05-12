@@ -254,8 +254,10 @@ test("Sort by Best Value persists across fuel filter change", async ({ page }) =
   await page.reload();
   await page.locator("th[data-col='bestValue']").click(); // sort by bestValue asc
   await page.locator("#fuel").selectOption("diesel");
-  // After fuel change, the table re-fetches AND re-sorts; first row is still the lowest-net Diesel station.
-  await expect(page.locator("table tbody tr").first()).toContainText("Aral");
+  // After fuel change, the table re-fetches AND re-sorts. Closed stations still
+  // participate in the visible sort, but the first open row is the best-value
+  // Diesel station.
+  await expect(page.locator("table tbody tr:not(.closed)").first()).toContainText("Aral");
   await expect(page.locator("th[data-col='bestValue']")).toContainText("(Diesel)");
 });
 

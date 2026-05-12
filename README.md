@@ -1,131 +1,173 @@
 # Gas Price Monitor
 
-Local web dashboard for German fuel prices (E5, E10, Diesel) powered by the
-[Tankerkönig](https://creativecommons.tankerkoenig.de/) open data API.
+![TypeScript](https://img.shields.io/badge/TypeScript-5.6-3178c6?logo=typescript&logoColor=white)
+![Bun](https://img.shields.io/badge/Bun-runtime-000000?logo=bun&logoColor=white)
+![Playwright](https://img.shields.io/badge/Playwright-tested-2ead33?logo=playwright&logoColor=white)
+![Docker](https://img.shields.io/badge/GHCR-image-0f172a?logo=docker&logoColor=white)
 
-Bun + TypeScript. No external runtime dependencies — just a static HTML page
-served by Bun, with a tiny proxy endpoint so the API key stays on the server.
+Local web dashboard for German fuel prices powered by the
+[Tankerkönig](https://creativecommons.tankerkoenig.de/) open data API. It finds
+nearby stations, highlights the cheapest open prices for E5, E10, and Diesel,
+and calculates the best real-world fill-up value after accounting for the drive.
 
-## Setup
+The app is a small Bun + TypeScript service: a static dashboard, a server-side
+API proxy so the Tankerkönig key never reaches the browser, disk caching for fair
+use, geocoding, price history, and optional price-drop alerts.
 
-1. **Get a free API key** at <https://creativecommons.tankerkoenig.de/#about>.
-   Register with an email; you'll get a UUID-format key.
+## Screenshots
 
-2. **Install deps** (Bun only — no npm packages required for runtime, but
-   `bun install` will pull dev types):
+Screenshots are captured from the deterministic Playwright test server, so they
+show realistic UI states without using live API keys.
 
-   ```sh
-   bun install
-   ```
+<p align="center">
+  <img src="docs/desktop.png" alt="Desktop Gas Price Monitor dashboard with all fuels and best value column" width="100%">
+</p>
 
-3. **Configure**:
+<p align="center">
+  <img src="docs/desktop-e10.png" alt="Desktop Gas Price Monitor filtered to E10 prices" width="67%">
+  <img src="docs/mobile.png" alt="Mobile Gas Price Monitor station card layout" width="22%">
+</p>
 
-   ```sh
-   cp .env.example .env
-   # Edit .env and set:
-   #   TANKERKOENIG_API_KEY=...    (your Tankerkönig key)
-   #   PHOTON_USER_AGENT=...       (REQUIRED — identifier for the geocoder)
-   ```
+## Features
 
-   `PHOTON_USER_AGENT` should identify your app and include a contact so
-   komoot (who runs the Photon geocoder we use) can reach you if anything
-   ever misbehaves. Server refuses to boot without it.
+- Location search for German places, streets, and postal codes via
+  [Photon](https://photon.komoot.io/) / OpenStreetMap.
+- Browser geolocation support for "near me" searches.
+- Fuel filters for `All`, `E5`, `E10`, and `Diesel`.
+- Cheapest open station highlighting per fuel.
+- **Best Value** calculation that combines fuel price, fill volume, station
+  distance, and vehicle consumption into net `€/fill`.
+- Sortable desktop table and mobile station cards.
+- 7-day price sparklines backed by local `data/history.jsonl`.
+- Server-side 5-minute Tankerkönig cache and 24-hour geocoder cache.
+- Optional desktop or webhook alerts when prices cross configured thresholds.
+- Docker image publishing to GitHub Container Registry.
 
-4. **Run**:
+## Quick Start
 
-   ```sh
-   bun run dev      # with hot reload
-   # or
-   bun run start    # plain
-   ```
+Requirements:
 
-5. Open <http://localhost:3000>.
+- [Bun](https://bun.sh/) 1.x
+- A free Tankerkönig API key from
+  <https://creativecommons.tankerkoenig.de/#about>
 
-## Usage
+Install dependencies:
 
-- Type a location into the search box ("Berlin Mitte", "Stuttgart
-  Hauptbahnhof", "Hauptstraße 42 Berlin") and pick a result. Arrow keys
-  navigate the dropdown; Enter picks; Escape dismisses.
-- Or hit **📍 Locate me** to use the browser's geolocation.
-- Picks the cheapest open station for each fuel grade (highlighted in green).
-- **Best Value column:** factors driving cost into the price. Shows net €/fill
-  for your selected fuel — cheaper-but-far loses to slightly-pricier-but-near
-  once you include the fuel burned getting there. Defaults assume a 40 L
-  fill at 7 L/100km — adjust the **Fill (L)** and **Consumption (L/100km)**
-  inputs to match your car. When Fuel is set to "All", Best Value tracks E10
-  (shown as `Best Value (E10)*`).
-- Auto-refreshes every 5 minutes (the Tankerkönig fair-use limit).
-- Search query + picked label + coordinates + radius + fuel are all saved
-  to `localStorage` so reload restores your last view.
-- Each price cell shows a 7-day sparkline once history has accumulated. Green
-  trend = falling, red trend = rising, gray = flat. Data persists in
-  `data/history.jsonl`.
-- Optional price-drop alerts: set `ALERT_E5_BELOW`, `ALERT_E10_BELOW`, or
-  `ALERT_DIESEL_BELOW` in `.env`. Alerts fire once per crossing-below (debounced
-  via a state file). Configure `ALERT_DESKTOP_NOTIFY=true` for `notify-send`
-  pop-ups, or `ALERT_WEBHOOK_URL` for an HTTP POST.
+```sh
+bun install
+```
 
-## Endpoints
+Create local configuration:
 
-- `GET /` — dashboard
-- `GET /api/config` — server defaults + flags (`hasApiKey`, `alertsEnabled`)
-- `GET /api/stations?lat=&lng=&radius=&type=` — proxies Tankerkönig's
-  `list.php` with server-side 5min disk caching. `type` is `e5`, `e10`,
-  `diesel`, or `all`.
-- `GET /api/geocode?q=...` — resolves a freeform query (place name,
-  street, PLZ) to up to 5 `{label, lat, lng}` results via Photon (komoot).
-  Server-side 24h disk cache, German-biased bbox. `q` must be 2-200 chars
-  after canonicalization.
-- `GET /api/history?stationIds=A,B,C&days=7` — historical prices for each
-  requested station, grouped by fuel. Up to 50 stationIds per call.
+```sh
+cp .env.example .env
+```
 
-## Notes
+Edit `.env` and set:
 
-- Tankerkönig terms ask you to cache responses for at least 5 minutes in
-  production. The server has a built-in 5-minute disk cache (in `.cache/`) and
-  also auto-refreshes the dashboard on that cadence, so any client reads stay
-  inside the fair-use envelope.
-- Radius must be between 1 and 25 km — out-of-range values return HTTP 400.
-- This is a personal/local tool — there's no auth on the server. Don't expose
-  it to the open internet without putting something in front of it.
+```sh
+TANKERKOENIG_API_KEY=your-key
+PHOTON_USER_AGENT=gas-price-monitor (you@example.com)
+```
+
+`PHOTON_USER_AGENT` is required. Use an identifier with a contact address so the
+Photon operator can reach you if your geocoder traffic misbehaves.
+
+Run the app:
+
+```sh
+bun run dev
+```
+
+Open <http://localhost:3000>.
+
+For a non-hot-reload server:
+
+```sh
+bun run start
+```
+
+## Usage Notes
+
+- Search for a location such as `Berlin Mitte`, `Stuttgart Hauptbahnhof`, or a
+  street address, then pick a result.
+- Use arrow keys and Enter in the location dropdown, or Escape to close it.
+- Adjust radius, fuel, fill volume, and consumption to model your actual trip.
+- When fuel is set to `All`, Best Value tracks E10 and marks the header with
+  an asterisk.
+- Preferences are saved in `localStorage`, including location, radius, fuel,
+  fill volume, and consumption.
+- The dashboard refreshes every 5 minutes to stay inside Tankerkönig fair-use
+  expectations.
+- This is a local/personal tool with no authentication. Put an auth layer in
+  front of it before exposing it beyond a trusted network.
 
 ## Configuration
 
 | Env var | Default | Notes |
-|---------|---------|-------|
-| `TANKERKOENIG_API_KEY` | — | Required. |
-| `PHOTON_USER_AGENT` | — | **Required.** Identifier sent to the Photon geocoder. Server refuses to boot if unset. |
-| `PHOTON_BASE_URL` | `https://photon.komoot.io` | Override mostly for testing or self-hosted Photon. |
-| `GEOCODE_CACHE_TTL_MS` | `86400000` (24h) | |
+| --- | --- | --- |
+| `TANKERKOENIG_API_KEY` | | Required for `/api/stations`. |
+| `PHOTON_USER_AGENT` | | Required. Sent to Photon geocoder. |
+| `PHOTON_BASE_URL` | `https://photon.komoot.io` | Override for tests or self-hosted Photon. |
+| `GEOCODE_CACHE_TTL_MS` | `86400000` | 24-hour geocoder cache. |
 | `GEOCODE_CACHE_MAX_ENTRIES` | `200` | LRU pruned on write. |
-| `PORT` | `3000` | 1–65535. |
-| `DEFAULT_LAT` | `52.5200` | Berlin Mitte. |
-| `DEFAULT_LNG` | `13.4050` | |
-| `DEFAULT_RADIUS` | `5` | 1–25 km. |
-| `CACHE_DIR` | `.cache` (in repo) | Disk cache location (stations + geocoder). |
-| `CACHE_TTL_MS` | `300000` (5 min) | Station cache. |
+| `PORT` | `3000` | HTTP server port. |
+| `DEFAULT_LAT` | `52.5200` | Default center, Berlin Mitte. |
+| `DEFAULT_LNG` | `13.4050` | Default center, Berlin Mitte. |
+| `DEFAULT_RADIUS` | `5` | Search radius in km, from 1 to 25. |
+| `CACHE_DIR` | `.cache` | Station and geocoder cache directory. |
+| `CACHE_TTL_MS` | `300000` | 5-minute station cache. |
 | `CACHE_MAX_ENTRIES` | `200` | LRU pruned on write. |
-| `DATA_DIR` | `data` (in repo) | Where `history.jsonl` and `alerts-state.json` live. |
-| `HISTORY_MAX_FILE_BYTES` | `52428800` (50 MB) | Rotates `history.jsonl` → `history.N.jsonl` when exceeded. |
-| `ALERT_E5_BELOW` | — | Threshold (€/L). Fires alert when cheapest open E5 crosses below. |
-| `ALERT_E10_BELOW` | — | Same, for E10. |
-| `ALERT_DIESEL_BELOW` | — | Same, for Diesel. |
-| `ALERT_DESKTOP_NOTIFY` | `false` | `true` to send `notify-send` desktop popups (Linux). |
-| `ALERT_WEBHOOK_URL` | — | If set, POSTs `{fuel, threshold, price, stationId, ts}` JSON on each alert. |
+| `DATA_DIR` | `data` | History and alert state directory. |
+| `HISTORY_MAX_FILE_BYTES` | `52428800` | Rotates `history.jsonl` after 50 MB. |
+| `ALERT_E5_BELOW` | | Alert threshold in `€/L`. |
+| `ALERT_E10_BELOW` | | Alert threshold in `€/L`. |
+| `ALERT_DIESEL_BELOW` | | Alert threshold in `€/L`. |
+| `ALERT_DESKTOP_NOTIFY` | `false` | Set `true` for Linux `notify-send` popups. |
+| `ALERT_WEBHOOK_URL` | | POST alert JSON to this URL. |
 
-Invalid env values cause the server to exit at startup with a clear message.
+Invalid environment values fail fast at startup with a clear error.
+
+## API
+
+| Endpoint | Description |
+| --- | --- |
+| `GET /` | Dashboard UI. |
+| `GET /api/config` | Public defaults and flags such as `hasApiKey` and `alertsEnabled`. |
+| `GET /api/stations?lat=&lng=&radius=&type=` | Proxies Tankerkönig `list.php` with disk caching. `type` is `e5`, `e10`, `diesel`, or `all`. |
+| `GET /api/geocode?q=...` | Returns up to 5 Photon geocoder results as `{ label, lat, lng }`. |
+| `GET /api/history?stationIds=A,B,C&days=7` | Returns grouped historical prices for up to 50 station IDs. |
+
+`radius` must be between 1 and 25 km. Out-of-range values return HTTP 400.
+
+## Development
+
+```sh
+bun run typecheck
+bun test tests/
+bun run test:e2e
+```
+
+The Playwright E2E suite runs against `e2e/test-server.ts`, which serves the
+real frontend with mocked Tankerkönig and Photon responses.
+The checked-in README screenshots in `docs/` were captured from that same
+mocked server, so they can be refreshed without live API credentials.
 
 ## Container / Kubernetes
 
-Every push to `main` builds an `linux/amd64` image and publishes it to
-`ghcr.io/nachtschatt3n/gas-price-monitor` via `.github/workflows/build.yml`.
-Tags: `latest` (main HEAD), `sha-<short>` (per commit), `v<tag>` (on git tags).
+Every push to `main` builds a `linux/amd64` image and publishes it to:
 
-For the `cberg-home-nextgen` homelab, the rollout is owned by the
-`cluster-ops-agent` in that gitops repo (Flux reconciliation, no manual
-kubectl). See [`CLAUDE.md`](CLAUDE.md) for the full handoff. The manifests
-in [`k8s/`](k8s/README.md) are reference templates for anyone running this
-elsewhere:
+```text
+ghcr.io/nachtschatt3n/gas-price-monitor
+```
+
+Tags:
+
+- `latest` for `main`
+- `sha-<short>` for each commit
+- `v<tag>` for git tags
+
+Reference Kubernetes manifests live in [`k8s/`](k8s/README.md):
 
 ```sh
 kubectl create secret generic gas-price-monitor --from-literal=api-key=YOUR_KEY
@@ -133,11 +175,16 @@ kubectl apply -f k8s/deployment.yaml -f k8s/service.yaml
 kubectl port-forward svc/gas-price-monitor 3000:80
 ```
 
-State is ephemeral (`emptyDir` for `/data` and `/cache`) — pod restarts wipe
-history. Swap to a `persistentVolumeClaim` in `deployment.yaml` if you want it
-to survive.
+The sample deployment uses ephemeral `emptyDir` volumes for `/data` and
+`/cache`. Swap in a persistent volume claim if you want price history to survive
+pod restarts.
 
-## License
+For the `cberg-home-nextgen` homelab, Flux rollout ownership is documented in
+[`CLAUDE.md`](CLAUDE.md).
 
-Code: do what you want.
-Data: Tankerkönig data is CC BY 4.0 — see <https://creativecommons.tankerkoenig.de/>.
+## Data and License
+
+Fuel price data comes from Tankerkönig and is licensed under CC BY 4.0. Photon
+geocoding uses OpenStreetMap data under ODbL.
+
+Project code: do what you want.
