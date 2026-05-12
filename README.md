@@ -14,18 +14,13 @@ The app is a small Bun + TypeScript service: a static dashboard, a server-side
 API proxy so the Tankerkönig key never reaches the browser, disk caching for fair
 use, geocoding, price history, and optional price-drop alerts.
 
-## Screenshots
+## Screenshot
 
-Screenshots are captured from the deterministic Playwright test server, so they
-show realistic UI states without using live API keys.
+The screenshot is captured from the deterministic Playwright test server, so it
+shows a realistic UI state without using live API keys.
 
 <p align="center">
   <img src="docs/desktop.png" alt="Desktop Gas Price Monitor dashboard with all fuels and best value column" width="100%">
-</p>
-
-<p align="center">
-  <img src="docs/desktop-e10.png" alt="Desktop Gas Price Monitor filtered to E10 prices" width="67%">
-  <img src="docs/mobile.png" alt="Mobile Gas Price Monitor station card layout" width="22%">
 </p>
 
 ## Features
@@ -150,7 +145,7 @@ bun run test:e2e
 
 The Playwright E2E suite runs against `e2e/test-server.ts`, which serves the
 real frontend with mocked Tankerkönig and Photon responses.
-The checked-in README screenshots in `docs/` were captured from that same
+The checked-in README screenshot in `docs/` was captured from that same
 mocked server, so they can be refreshed without live API credentials.
 
 ## Container / Kubernetes
