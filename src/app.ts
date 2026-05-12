@@ -9,6 +9,7 @@ import {
 import { StationCache, type CacheConfig } from "./cache.ts";
 import { History } from "./history.ts";
 import { Alerts, type AlertConfig, type AlertThresholds, type AlertDeps } from "./alerts.ts";
+import { Geocoder, GeocoderError } from "./geocoder.ts";
 
 export interface AppEnv {
   apiKey: string;
@@ -24,6 +25,10 @@ export interface AppEnv {
   alertThresholds: AlertThresholds;
   alertWebhookUrl?: string;
   alertDesktopNotify: boolean;
+  photonUserAgent: string;
+  photonBaseUrl: string;
+  geocodeCacheTtlMs: number;
+  geocodeCacheMaxEntries: number;
 }
 
 export interface AppDeps {
@@ -33,6 +38,7 @@ export interface AppDeps {
   history?: History;
   alerts?: Alerts;
   alertDeps?: AlertDeps;
+  geocoder?: Geocoder;
 }
 
 const ALLOWED_TYPES = new Set<RequestedFuel>(["e5", "e10", "diesel", "all"]);
@@ -70,6 +76,13 @@ export function parseEnv(
     return n;
   };
 
+  const photonUserAgent = (source.PHOTON_USER_AGENT ?? "").trim();
+  if (!photonUserAgent) {
+    throw new Error(
+      "PHOTON_USER_AGENT is required (set it in .env). Identify the app and a contact, e.g. 'gas-price-monitor (you@example.com)'.",
+    );
+  }
+
   return {
     apiKey: source.TANKERKOENIG_API_KEY ?? "",
     defaultLat: numFromEnv("DEFAULT_LAT", 52.52, -90, 90),
@@ -88,6 +101,10 @@ export function parseEnv(
     },
     alertWebhookUrl: source.ALERT_WEBHOOK_URL || undefined,
     alertDesktopNotify: source.ALERT_DESKTOP_NOTIFY === "true",
+    photonUserAgent,
+    photonBaseUrl: (source.PHOTON_BASE_URL || "https://photon.komoot.io").replace(/\/+$/, ""),
+    geocodeCacheTtlMs: numFromEnv("GEOCODE_CACHE_TTL_MS", 24 * 60 * 60 * 1000, 1000, 7 * 24 * 60 * 60 * 1000),
+    geocodeCacheMaxEntries: numFromEnv("GEOCODE_CACHE_MAX_ENTRIES", 200, 10, 10000),
   };
 }
 
@@ -168,9 +185,26 @@ export function createApp(env: AppEnv, deps: AppDeps = {}) {
 
   const tankerDeps: ListStationsDeps = deps.fetch ? { fetch: deps.fetch } : {};
 
+  const geocoder =
+    deps.geocoder ??
+    new Geocoder(
+      {
+        baseUrl: env.photonBaseUrl,
+        userAgent: env.photonUserAgent,
+        dir: join(env.cacheDir, "geocode"),
+        ttlMs: env.geocodeCacheTtlMs,
+        maxEntries: env.geocodeCacheMaxEntries,
+        lang: "de",
+        bbox: "5.866,47.270,15.042,55.058",
+        limit: 5,
+      },
+      { fetch: deps.fetch, now: deps.now },
+    );
+
   void cache.init();
   void history.init();
   void alerts.init();
+  void geocoder.init();
 
   async function fetchAndRecord(
     lat: number,
@@ -244,6 +278,24 @@ export function createApp(env: AppEnv, deps: AppDeps = {}) {
     }
   }
 
+  async function getGeocode(req: Request): Promise<Response> {
+    try {
+      const url = new URL(req.url);
+      const raw = url.searchParams.get("q") ?? "";
+      const canon = raw.trim().replace(/\s+/g, " ");
+      if (canon.length < 2 || canon.length > 200) {
+        return json({ error: "invalid query" }, 400);
+      }
+      const results = await geocoder.geocode(canon);
+      return json({ results });
+    } catch (err) {
+      if (err instanceof GeocoderError) {
+        return json({ error: "geocoder unavailable" }, err.status);
+      }
+      return json({ error: "internal error" }, 500);
+    }
+  }
+
   function getConfig(): Response {
     return json({
       defaultLat: env.defaultLat,
@@ -258,6 +310,7 @@ export function createApp(env: AppEnv, deps: AppDeps = {}) {
     "/api/config": { GET: () => getConfig() },
     "/api/stations": { GET: (req: Request) => getStations(req) },
     "/api/history": { GET: (req: Request) => getHistory(req) },
+    "/api/geocode": { GET: (req: Request) => getGeocode(req) },
   } as const;
 
   async function fetchFallback(req: Request): Promise<Response> {
@@ -268,5 +321,5 @@ export function createApp(env: AppEnv, deps: AppDeps = {}) {
     return serveStatic(env.publicDir, url.pathname);
   }
 
-  return { fetch: fetchFallback, routes, history, alerts };
+  return { fetch: fetchFallback, routes, history, alerts, geocoder };
 }

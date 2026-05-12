@@ -58,6 +58,10 @@ function env(overrides: Partial<AppEnv> = {}): AppEnv {
     historyMaxFileBytes: 1024 * 1024,
     alertThresholds: {},
     alertDesktopNotify: false,
+    photonUserAgent: "gas-price-monitor (test)",
+    photonBaseUrl: "https://photon.test",
+    geocodeCacheTtlMs: 60_000,
+    geocodeCacheMaxEntries: 200,
     ...overrides,
   };
 }
@@ -80,9 +84,11 @@ async function call(app: ReturnType<typeof createApp>, method: string, path: str
   return await app.fetch(req);
 }
 
+const MIN_ENV = { PHOTON_USER_AGENT: "gas-price-monitor (test)" };
+
 describe("parseEnv", () => {
-  test("returns defaults when env is empty", () => {
-    const result = parseEnv({}, "/pub", "/cache", "/data");
+  test("returns defaults when only required env is set", () => {
+    const result = parseEnv(MIN_ENV, "/pub", "/cache", "/data");
     expect(result).toMatchObject({
       apiKey: "",
       defaultLat: 52.52,
@@ -91,22 +97,48 @@ describe("parseEnv", () => {
       cacheTtlMs: 5 * 60 * 1000,
       alertThresholds: {},
       alertDesktopNotify: false,
+      photonUserAgent: "gas-price-monitor (test)",
+      photonBaseUrl: "https://photon.komoot.io",
+      geocodeCacheTtlMs: 24 * 60 * 60 * 1000,
+      geocodeCacheMaxEntries: 200,
     });
   });
 
+  test("PHOTON_USER_AGENT is required (throws when missing)", () => {
+    expect(() => parseEnv({}, "/p", "/c", "/d")).toThrow(/PHOTON_USER_AGENT/);
+    expect(() => parseEnv({ PHOTON_USER_AGENT: "" }, "/p", "/c", "/d")).toThrow(/PHOTON_USER_AGENT/);
+    expect(() => parseEnv({ PHOTON_USER_AGENT: "   " }, "/p", "/c", "/d")).toThrow(/PHOTON_USER_AGENT/);
+  });
+
+  test("PHOTON_BASE_URL strips trailing slash", () => {
+    const result = parseEnv(
+      { ...MIN_ENV, PHOTON_BASE_URL: "https://photon.example.com/" },
+      "/p",
+      "/c",
+      "/d",
+    );
+    expect(result.photonBaseUrl).toBe("https://photon.example.com");
+  });
+
   test("rejects invalid DEFAULT_LAT (NaN, out of range)", () => {
-    expect(() => parseEnv({ DEFAULT_LAT: "not-a-number" }, "/p", "/c", "/d")).toThrow(/DEFAULT_LAT/);
-    expect(() => parseEnv({ DEFAULT_LAT: "200" }, "/p", "/c", "/d")).toThrow(/DEFAULT_LAT/);
+    expect(() => parseEnv({ ...MIN_ENV, DEFAULT_LAT: "not-a-number" }, "/p", "/c", "/d")).toThrow(/DEFAULT_LAT/);
+    expect(() => parseEnv({ ...MIN_ENV, DEFAULT_LAT: "200" }, "/p", "/c", "/d")).toThrow(/DEFAULT_LAT/);
   });
 
   test("rejects invalid DEFAULT_RADIUS (out of [1,25])", () => {
-    expect(() => parseEnv({ DEFAULT_RADIUS: "100" }, "/p", "/c", "/d")).toThrow(/DEFAULT_RADIUS/);
-    expect(() => parseEnv({ DEFAULT_RADIUS: "0" }, "/p", "/c", "/d")).toThrow(/DEFAULT_RADIUS/);
+    expect(() => parseEnv({ ...MIN_ENV, DEFAULT_RADIUS: "100" }, "/p", "/c", "/d")).toThrow(/DEFAULT_RADIUS/);
+    expect(() => parseEnv({ ...MIN_ENV, DEFAULT_RADIUS: "0" }, "/p", "/c", "/d")).toThrow(/DEFAULT_RADIUS/);
+  });
+
+  test("rejects invalid GEOCODE_CACHE_TTL_MS", () => {
+    expect(() =>
+      parseEnv({ ...MIN_ENV, GEOCODE_CACHE_TTL_MS: "0" }, "/p", "/c", "/d"),
+    ).toThrow(/GEOCODE_CACHE_TTL_MS/);
   });
 
   test("parses alert thresholds when set", () => {
     const result = parseEnv(
-      { ALERT_E10_BELOW: "1.65", ALERT_DIESEL_BELOW: "1.55", ALERT_DESKTOP_NOTIFY: "true" },
+      { ...MIN_ENV, ALERT_E10_BELOW: "1.65", ALERT_DIESEL_BELOW: "1.55", ALERT_DESKTOP_NOTIFY: "true" },
       "/p",
       "/c",
       "/d",
@@ -116,7 +148,7 @@ describe("parseEnv", () => {
   });
 
   test("rejects invalid alert threshold", () => {
-    expect(() => parseEnv({ ALERT_E5_BELOW: "not-a-number" }, "/p", "/c", "/d")).toThrow(/ALERT_E5_BELOW/);
+    expect(() => parseEnv({ ...MIN_ENV, ALERT_E5_BELOW: "not-a-number" }, "/p", "/c", "/d")).toThrow(/ALERT_E5_BELOW/);
   });
 });
 
@@ -286,6 +318,96 @@ describe("alerts integration", () => {
     await call(app, "GET", "/api/stations?lat=52.5&lng=13.4&radius=5");
     await new Promise((r) => setTimeout(r, 30));
     expect(events.some((e) => String(e).includes("E10 dropped"))).toBe(true);
+  });
+});
+
+describe("/api/geocode", () => {
+  const PHOTON_BODY = {
+    type: "FeatureCollection",
+    features: [
+      {
+        properties: { name: "Berlin Hauptbahnhof", city: "Berlin" },
+        geometry: { coordinates: [13.3696614, 52.5249451] },
+      },
+      {
+        properties: { name: "Berlin", state: "Berlin" },
+        geometry: { coordinates: [13.4, 52.52] },
+      },
+    ],
+  };
+
+  test("rejects empty q with 400", async () => {
+    const app = createApp(env(), { fetch: mockFetch(PHOTON_BODY) });
+    const res = await call(app, "GET", "/api/geocode?q=");
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: string }).error).toMatch(/invalid query/);
+  });
+
+  test("rejects 1-char q with 400 (after canonicalization)", async () => {
+    const app = createApp(env(), { fetch: mockFetch(PHOTON_BODY) });
+    const res = await call(app, "GET", "/api/geocode?q=%20%20a%20%20");
+    expect(res.status).toBe(400);
+  });
+
+  test("rejects 201-char q with 400", async () => {
+    const app = createApp(env(), { fetch: mockFetch(PHOTON_BODY) });
+    const long = "A".repeat(201);
+    const res = await call(app, "GET", `/api/geocode?q=${encodeURIComponent(long)}`);
+    expect(res.status).toBe(400);
+  });
+
+  test("happy path: returns parsed results", async () => {
+    const app = createApp(env(), { fetch: mockFetch(PHOTON_BODY) });
+    const res = await call(app, "GET", "/api/geocode?q=Berlin");
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { results: { label: string; lat: number; lng: number }[] };
+    expect(body.results).toHaveLength(2);
+    expect(body.results[0]).toMatchObject({
+      label: "Berlin Hauptbahnhof, Berlin",
+      lat: 52.5249451,
+      lng: 13.3696614,
+    });
+  });
+
+  test("upstream 5xx maps to 502 with friendly error message", async () => {
+    const app = createApp(env(), { fetch: mockFetch("broken", 500) });
+    const res = await call(app, "GET", "/api/geocode?q=Berlin");
+    expect(res.status).toBe(502);
+    expect(((await res.json()) as { error: string }).error).toBe("geocoder unavailable");
+  });
+
+  test("no-result query returns 200 with empty results", async () => {
+    const app = createApp(env(), {
+      fetch: mockFetch({ type: "FeatureCollection", features: [] }),
+    });
+    const res = await call(app, "GET", "/api/geocode?q=Asdfghjkl");
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as { results: unknown[] }).results).toEqual([]);
+  });
+
+  test("second identical query within TTL hits the cache (1 upstream call)", async () => {
+    let calls = 0;
+    const fetchImpl = (async () => {
+      calls++;
+      return new Response(JSON.stringify(PHOTON_BODY), { status: 200 });
+    }) as unknown as typeof fetch;
+    const app = createApp(env(), { fetch: fetchImpl });
+    await call(app, "GET", "/api/geocode?q=Berlin");
+    await call(app, "GET", "/api/geocode?q=Berlin");
+    expect(calls).toBe(1);
+  });
+
+  test("canonicalization collapses near-identical queries onto same cache entry", async () => {
+    let calls = 0;
+    const fetchImpl = (async () => {
+      calls++;
+      return new Response(JSON.stringify(PHOTON_BODY), { status: 200 });
+    }) as unknown as typeof fetch;
+    const app = createApp(env(), { fetch: fetchImpl });
+    await call(app, "GET", "/api/geocode?q=Berlin");
+    await call(app, "GET", "/api/geocode?q=%20%20BERLIN%20%20");
+    await call(app, "GET", "/api/geocode?q=berlin");
+    expect(calls).toBe(1);
   });
 });
 
