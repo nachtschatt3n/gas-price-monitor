@@ -4,6 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Gas Price Monitor</title>
+  <link rel="stylesheet" href="/lib/leaflet.css" />
   <style>
     :root {
       --bg: #0f1115;
@@ -100,6 +101,130 @@
       text-decoration-color: var(--border); }
     .footer a:hover { text-decoration-color: var(--accent); color: var(--text); }
 
+    /* ---------- Map (Leaflet) ---------- */
+    /* CRITICAL: do NOT add overflow: auto/hidden to any ancestor of #map.
+       position: sticky silently breaks when any ancestor has overflow. */
+    .layout {
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+    /* Mobile: map first (Default #12 — "map IS the answer on mobile").
+       Desktop overrides this in the ≥1024px block. */
+    .map-wrap { order: -1; }
+    .table-wrap { order: 0; }
+    .map-wrap {
+      position: relative;
+      width: 100%;
+      height: min(400px, 55vh);
+    }
+    .gpm-map {
+      width: 100%;
+      height: 100%;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+    .gpm-map--placeholder {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      color: var(--muted);
+      font-size: 13px;
+      text-align: center;
+      padding: 16px;
+    }
+    .gpm-map__hint { margin: 0; max-width: 280px; }
+    .map-footnote {
+      font-size: 11px;
+      color: var(--muted);
+      text-align: center;
+      margin-top: 4px;
+    }
+    /* Leaflet visual overrides — dark theme integration */
+    .leaflet-container {
+      background: var(--panel);
+      font-family: inherit;
+      font-size: 12px;
+    }
+    .leaflet-control-zoom a,
+    .leaflet-control-attribution {
+      background: var(--panel-2) !important;
+      color: var(--muted) !important;
+      border-color: var(--border) !important;
+    }
+    .leaflet-control-zoom a:hover {
+      background: var(--border) !important;
+      color: var(--text) !important;
+    }
+    .leaflet-control-attribution a { color: var(--muted) !important; }
+    .leaflet-control-attribution a:hover { color: var(--text) !important; }
+    .leaflet-popup-content-wrapper {
+      background: var(--panel-2);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      box-shadow: none;
+    }
+    .leaflet-popup-tip { background: var(--panel-2); border: 1px solid var(--border); }
+    .leaflet-popup-close-button { color: var(--muted); }
+    .gpm-popup__name { font-weight: 600; }
+    .gpm-popup__brand { font-size: 11px; color: var(--muted); margin-top: 1px; }
+    .gpm-popup__price { margin-top: 6px; }
+    .gpm-popup__dist { margin-top: 2px; font-size: 11px; color: var(--muted); }
+    /* divIcons should not have Leaflet's default background/border */
+    .gpm-pin { background: transparent; border: none; }
+
+    /* "Use my location" inline status */
+    .geoloc-row {
+      grid-column: 1 / -1;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+    .geoloc-msg {
+      font-size: 12px;
+      color: var(--muted);
+    }
+    .geoloc-msg.err { color: var(--err); }
+    .geoloc-msg.ok { color: var(--accent); }
+    /* Best Value uncertainty mark (Default #13 — ~ during straight-line, gone on OSRM ready) */
+    .approx-mark {
+      color: var(--muted);
+      font-weight: normal;
+      margin-left: 2px;
+      cursor: help;
+    }
+
+    /* Desktop ≥1024px: table left 60%, map right 40%, map sticky top:16px.
+       Page-level scroll only (eng review D2). */
+    @media (min-width: 1024px) {
+      .layout {
+        flex-direction: row;
+        gap: 20px;
+        align-items: flex-start;
+      }
+      /* Reset mobile ordering: table left, map right. */
+      .map-wrap { order: 1; }
+      .table-wrap { order: 0; }
+      .map-wrap {
+        flex: 0 0 40%;
+        max-width: 40%;
+        height: min(600px, calc(100vh - 32px));
+        position: sticky;
+        top: 16px;
+      }
+      .table-wrap {
+        flex: 1 1 60%;
+        min-width: 0;
+      }
+      .map-footnote { display: none; }
+    }
+
     /* Mobile: collapse 6-col table into card-per-station grid */
     @media (max-width: 640px) {
       header { padding: 16px; }
@@ -185,20 +310,41 @@
       </div>
       <div class="field">
         <label for="consumption">Consumption (L/100km)</label>
-        <input id="consumption" type="number" min="1" max="30" step="0.5" placeholder="7" />
+        <input id="consumption" type="number" min="1" max="30" step="0.5" placeholder="8" />
       </div>
       <div class="actions">
-        <button type="button" id="locate">📍 Locate me</button>
+        <button type="button" id="locate" aria-label="Use my current location">📍 Use my location</button>
         <button type="submit" class="primary">Refresh</button>
+      </div>
+      <div class="geoloc-row">
+        <span id="geoloc-msg" class="geoloc-msg" role="status" aria-live="polite"></span>
       </div>
     </form>
 
-    <div id="result"></div>
+    <div class="layout">
+      <div class="table-wrap">
+        <div id="result"></div>
+      </div>
+      <div class="map-wrap">
+        <div id="map" class="gpm-map gpm-map--placeholder" role="img"
+             aria-label="Map will appear after you search for a location">
+          <svg width="48" height="48" viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 1118 0z"
+                  fill="none" stroke="var(--muted)" stroke-width="2"/>
+            <circle cx="12" cy="10" r="3" fill="none" stroke="var(--muted)" stroke-width="2"/>
+          </svg>
+          <p class="gpm-map__hint">Search for a location to see stations on the map.</p>
+        </div>
+        <div class="map-footnote">Drag the pin on desktop, or use 📍 Use my location to refine on mobile.</div>
+      </div>
+    </div>
 
     <div class="footer">
       Prices: <a href="https://creativecommons.tankerkoenig.de/" target="_blank" rel="noopener">Tankerkönig (CC BY 4.0)</a>
       · Geocoding: <a href="https://photon.komoot.io/" target="_blank" rel="noopener">komoot/Photon</a>
       using <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap (ODbL)</a>
+      · Tiles: <span id="tile-attr">© OpenStreetMap</span>
+      · Routing: <a href="https://project-osrm.org/" target="_blank" rel="noopener">OSRM</a> via OpenStreetMap
       · Auto-refresh every 5 min · <span id="last-fetch">never</span>
     </div>
   </main>
@@ -220,6 +366,18 @@
       lastSearched: null,
       location: { q: "", label: "", lat: 0, lng: 0 },
       picker: { open: false, results: [], highlight: 0, mode: "results" }, // mode: results | empty | loading | error
+      // ---- Map state (Lane D7) ----
+      cfg: null,                       // /api/config response (hasStadiaKey, stadiaApiKey)
+      map: null,                       // L.Map instance, null until first search
+      mapInit: null,                   // Promise<L.Map> | null — init guard (eng D1)
+      markers: { user: null, stations: new Map() }, // L.Marker objects
+      activeRoute: null,               // L.LayerGroup (polyline + outline)
+      activeRouteStationId: null,      // station id whose route is drawn
+      hasFitBounds: false,             // only fit on first init
+      distances: new Map(),            // stationId -> {meters, seconds} from /api/distances
+      osrmStatus: "pending",           // "pending" | "ready" | "error"
+      requestEpoch: 0,                 // monotonic counter for stale-response drops (eng D8 / Codex #19+20+21)
+      geolocStatus: "idle",            // "idle" | "requesting" | "denied" | "timeout"
     };
 
     function loadPrefs() {
@@ -233,8 +391,387 @@
       localStorage.setItem(STORAGE_KEY, JSON.stringify(p));
     }
 
+    // ---------- Map (Lane D7) ----------
+
+    // Cached computed colors — resolved once after Leaflet loads (Codex #12).
+    // We inject literal colors into divIcon SVG strings because CSS var
+    // resolution inside Leaflet-created DOM is unreliable.
+    let _color = null;
+    function colors() {
+      if (_color) return _color;
+      const cs = getComputedStyle(document.documentElement);
+      const fall = (v, f) => (v && v.trim()) || f;
+      _color = {
+        accent: fall(cs.getPropertyValue("--accent"), "#4ade80"),
+        muted: fall(cs.getPropertyValue("--muted"), "#8a92a3"),
+        text: fall(cs.getPropertyValue("--text"), "#e8eaed"),
+      };
+      return _color;
+    }
+
+    function stationMarkerIcon(role) {
+      const c = colors();
+      if (role === "winner") {
+        return L.divIcon({
+          html: `<svg width="22" height="22" viewBox="0 0 22 22"><circle cx="11" cy="11" r="9" fill="${c.accent}" stroke="#fff" stroke-width="2"/><circle cx="11" cy="11" r="2" fill="#fff"/></svg>`,
+          className: "gpm-pin gpm-pin--winner",
+          iconSize: [22, 22],
+          iconAnchor: [11, 11],
+        });
+      }
+      const isClosed = role === "closed";
+      const opacity = isClosed ? "0.4" : "1";
+      const strokeWidth = isClosed ? "1" : "2";
+      return L.divIcon({
+        html: `<svg width="14" height="14" viewBox="0 0 14 14"><circle cx="7" cy="7" r="5" fill="none" stroke="${c.muted}" stroke-width="${strokeWidth}" opacity="${opacity}"/></svg>`,
+        className: `gpm-pin gpm-pin--${role}`,
+        iconSize: [14, 14],
+        iconAnchor: [7, 7],
+      });
+    }
+
+    function userMarkerIcon() {
+      const c = colors();
+      return L.divIcon({
+        html: `<svg width="18" height="18" viewBox="0 0 18 18"><g transform="rotate(45 9 9)"><rect x="3" y="3" width="12" height="12" fill="${c.accent}" stroke="${c.text}" stroke-width="1"/></g><path d="M9 1 V17 M1 9 H17" stroke="${c.text}" stroke-width="0.5" opacity="0.6"/></svg>`,
+        className: "gpm-pin gpm-pin--user",
+        iconSize: [18, 18],
+        iconAnchor: [9, 9],
+      });
+    }
+
+    // Lazy-load Leaflet's JS on first search. Returns Promise<typeof L>.
+    let _leafletLoad = null;
+    function loadLeaflet() {
+      if (window.L) return Promise.resolve(window.L);
+      if (_leafletLoad) return _leafletLoad;
+      _leafletLoad = new Promise((resolve, reject) => {
+        const s = document.createElement("script");
+        s.src = "/lib/leaflet.js";
+        s.async = true;
+        s.onload = () => resolve(window.L);
+        s.onerror = () => reject(new Error("Leaflet failed to load"));
+        document.head.appendChild(s);
+      });
+      return _leafletLoad;
+    }
+
+    // initMap is idempotent via state.mapInit Promise guard (eng review D1 / Codex #1).
+    // Multiple parallel callers share the same Promise.
+    function initMap() {
+      if (state.mapInit) return state.mapInit;
+      state.mapInit = (async () => {
+        await loadLeaflet();
+        // Replace the placeholder div content.
+        const container = document.getElementById("map");
+        container.classList.remove("gpm-map--placeholder");
+        container.removeAttribute("role");
+        container.removeAttribute("aria-label");
+        container.innerHTML = "";
+
+        const map = L.map(container, {
+          zoomControl: true,
+          attributionControl: true,
+        }).setView([state.location.lat, state.location.lng], 13);
+
+        // Tile layer. Stadia first (with key), OSM fallback.
+        const cfg = state.cfg ?? {};
+        if (cfg.hasStadiaKey && cfg.stadiaApiKey) {
+          L.tileLayer(
+            `https://tiles.stadiamaps.com/tiles/alidade_smooth_dark/{z}/{x}/{y}{r}.png?api_key=${encodeURIComponent(cfg.stadiaApiKey)}`,
+            {
+              maxZoom: 20,
+              attribution:
+                '&copy; <a href="https://stadiamaps.com/" target="_blank" rel="noopener">Stadia Maps</a> &copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a>',
+            },
+          ).addTo(map);
+        } else {
+          L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+            maxZoom: 19,
+            attribution:
+              '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors',
+          }).addTo(map);
+        }
+
+        state.map = map;
+        // After container becomes visible, force Leaflet to recompute size
+        // (Codex #1 — tiles render clipped otherwise).
+        setTimeout(() => map.invalidateSize(), 0);
+
+        // Breakpoint changes also need invalidateSize.
+        if (window.matchMedia) {
+          const mq = window.matchMedia("(min-width: 1024px)");
+          const onMq = () => {
+            if (state.map) state.map.invalidateSize();
+          };
+          if (typeof mq.addEventListener === "function") mq.addEventListener("change", onMq);
+          else if (typeof mq.addListener === "function") mq.addListener(onMq);
+        }
+
+        return map;
+      })().catch((err) => {
+        // Reset on error so a retry can re-init.
+        state.mapInit = null;
+        throw err;
+      });
+      return state.mapInit;
+    }
+
+    // Place / move the user pin. Draggable on viewports ≥1024px only.
+    function ensureUserMarker() {
+      if (!state.map) return;
+      const ll = [state.location.lat, state.location.lng];
+      const draggable = window.matchMedia && window.matchMedia("(min-width: 1024px)").matches;
+      if (!state.markers.user) {
+        state.markers.user = L.marker(ll, {
+          icon: userMarkerIcon(),
+          draggable,
+          autoPan: true,
+          title: "Your location — drag to refine (desktop).",
+          zIndexOffset: 1000,
+        }).addTo(state.map);
+        state.markers.user.on("dragend", () => {
+          if (!state.markers.user) return;
+          const pos = state.markers.user.getLatLng();
+          state.location = {
+            ...state.location,
+            label: "Custom location",
+            lat: pos.lat,
+            lng: pos.lng,
+            q: "",
+          };
+          $("q").value = state.location.label;
+          state.requestEpoch++;
+          refresh();
+        });
+      } else {
+        state.markers.user.setLatLng(ll);
+      }
+    }
+
+    // Reconcile station markers against state.stations + the current best-value winner.
+    function updateMarkers(bestValueStationId) {
+      if (!state.map) return;
+      const seen = new Set();
+      for (const s of state.stations) {
+        seen.add(s.id);
+        const ll = [s.lat, s.lng];
+        const role = !s.isOpen
+          ? "closed"
+          : s.id === bestValueStationId
+          ? "winner"
+          : "open";
+        let m = state.markers.stations.get(s.id);
+        if (!m) {
+          m = L.marker(ll, { icon: stationMarkerIcon(role), title: s.name }).addTo(state.map);
+          m.on("click", () => onStationMarkerClick(s));
+          state.markers.stations.set(s.id, m);
+        } else {
+          m.setLatLng(ll);
+          m.setIcon(stationMarkerIcon(role));
+        }
+        if (role === "winner") {
+          m.setZIndexOffset(500);
+        } else {
+          m.setZIndexOffset(0);
+        }
+      }
+      // Drop markers for stations that disappeared.
+      for (const [id, m] of state.markers.stations) {
+        if (!seen.has(id)) {
+          m.remove();
+          state.markers.stations.delete(id);
+        }
+      }
+    }
+
+    function popupHtml(s, distKm, distMin) {
+      const price = (() => {
+        const f = trackedFuel();
+        const p = s[f];
+        return typeof p === "number" && p > 0 ? `${p.toFixed(3)} €/L ${fuelLabelFor(f)}` : "—";
+      })();
+      const distStr = typeof distKm === "number" ? `${distKm.toFixed(1)} km` : "—";
+      const minStr = typeof distMin === "number" ? ` · ${Math.round(distMin)} min driving` : "";
+      return `<div class="gpm-popup">
+        <div class="gpm-popup__name">${escapeHtml(s.name)}</div>
+        <div class="gpm-popup__brand">${escapeHtml(s.brand || "")}</div>
+        <div class="gpm-popup__price"><strong>${price}</strong></div>
+        <div class="gpm-popup__dist">${distStr}${minStr}</div>
+      </div>`;
+    }
+
+    async function onStationMarkerClick(station) {
+      if (!state.map) return;
+      // If the same station is already drawn, just open its popup again.
+      if (state.activeRouteStationId === station.id && state.activeRoute) {
+        const m = state.markers.stations.get(station.id);
+        if (m) m.openPopup();
+        return;
+      }
+      // Stamp request epoch so a stale response doesn't overwrite a newer one.
+      const epoch = state.requestEpoch;
+      const params = new URLSearchParams({
+        fromLat: String(state.location.lat),
+        fromLng: String(state.location.lng),
+        toLat: String(station.lat),
+        toLng: String(station.lng),
+      });
+      let body;
+      try {
+        const res = await fetch(`/api/route?${params}`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        body = await res.json();
+      } catch {
+        setStatus("routing unavailable — showing approximate distance", "err");
+        return;
+      }
+      if (epoch !== state.requestEpoch) return; // stale, ignore
+      drawRoute(station, body.geometry, body.meters, body.seconds);
+    }
+
+    function clearRoute() {
+      if (state.activeRoute && state.map) state.activeRoute.removeFrom(state.map);
+      state.activeRoute = null;
+      state.activeRouteStationId = null;
+    }
+
+    function drawRoute(station, geometry, meters, seconds) {
+      if (!state.map || !geometry || !Array.isArray(geometry.coordinates)) return;
+      clearRoute();
+      const c = colors();
+      // GeoJSON is [lng, lat]; Leaflet wants [lat, lng].
+      const latlngs = geometry.coordinates.map(([lng, lat]) => [lat, lng]);
+      const outline = L.polyline(latlngs, { color: "rgba(0,0,0,0.45)", weight: 6, opacity: 1 });
+      const route = L.polyline(latlngs, {
+        color: c.accent,
+        weight: 4,
+        opacity: 0.9,
+        className: "gpm-route",
+      });
+      const layer = L.layerGroup([outline, route]).addTo(state.map);
+      state.activeRoute = layer;
+      state.activeRouteStationId = station.id;
+      const m = state.markers.stations.get(station.id);
+      if (m) {
+        m.bindPopup(popupHtml(station, meters / 1000, seconds / 60));
+        m.openPopup();
+      }
+    }
+
+    function fitMapToAll() {
+      if (!state.map || state.hasFitBounds) return;
+      const points = [[state.location.lat, state.location.lng]];
+      for (const s of state.stations) points.push([s.lat, s.lng]);
+      if (points.length < 2) return;
+      // Default #25 revised: bothmin and max zoom bounds.
+      state.map.fitBounds(points, { maxZoom: 16, minZoom: 9, padding: [40, 40] });
+      state.hasFitBounds = true;
+    }
+
+    // Fetch driving distances from /api/distances and apply with epoch versioning.
+    async function fetchDistances() {
+      const stations = state.stations
+        .filter((s) => typeof s.lat === "number" && typeof s.lng === "number")
+        .slice(0, 50);
+      if (stations.length === 0) {
+        state.osrmStatus = "ready";
+        return;
+      }
+      const epoch = state.requestEpoch;
+      try {
+        const res = await fetch("/api/distances", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            userLat: state.location.lat,
+            userLng: state.location.lng,
+            stations: stations.map((s) => ({ id: s.id, lat: s.lat, lng: s.lng })),
+          }),
+        });
+        if (epoch !== state.requestEpoch) return; // stale
+        if (!res.ok) {
+          state.osrmStatus = "error";
+          render();
+          return;
+        }
+        const body = await res.json();
+        if (epoch !== state.requestEpoch) return; // stale
+        state.distances = new Map(Object.entries(body.distances ?? {}));
+        state.osrmStatus = "ready";
+        render();
+      } catch {
+        if (epoch !== state.requestEpoch) return;
+        state.osrmStatus = "error";
+        render();
+      }
+    }
+
+    // Geolocation 5-state machine (Default #27 + eng review D3 + Codex #5+#6).
+    function setGeolocStatus(status, msg = "", cls = "") {
+      state.geolocStatus = status;
+      const btn = $("locate");
+      const msgEl = $("geoloc-msg");
+      if (status === "requesting") {
+        btn.disabled = true;
+        btn.textContent = "📍 Locating…";
+      } else {
+        btn.disabled = false;
+        btn.textContent = "📍 Use my location";
+      }
+      msgEl.textContent = msg;
+      msgEl.className = "geoloc-msg" + (cls ? " " + cls : "");
+    }
+
+    function onGeolocClick() {
+      if (!("geolocation" in navigator)) {
+        setGeolocStatus("idle", "Browser doesn't support geolocation.", "err");
+        return;
+      }
+      setGeolocStatus("requesting", "");
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          setGeolocStatus("idle", "");
+          state.location = {
+            q: "",
+            label: "Current location",
+            lat: pos.coords.latitude,
+            lng: pos.coords.longitude,
+          };
+          $("q").value = state.location.label;
+          closePicker();
+          state.requestEpoch++;
+          state.hasFitBounds = false; // re-fit on new location
+          refresh();
+        },
+        (err) => {
+          if (err.code === 1) {
+            setGeolocStatus("denied", "Location permission denied — search by name instead.", "err");
+          } else if (err.code === 3) {
+            setGeolocStatus("timeout", "Took too long. Try again or search by name.", "err");
+          } else {
+            setGeolocStatus("idle", "Could not get location. Search by name instead.", "err");
+          }
+        },
+        { enableHighAccuracy: false, timeout: 10000, maximumAge: 60000 },
+      );
+    }
+
     async function init() {
       const cfg = await fetch("/api/config").then((r) => r.json());
+      state.cfg = cfg;
+      // Update tile attribution per provider.
+      const tileAttr = $("tile-attr");
+      if (tileAttr) {
+        tileAttr.innerHTML = cfg.hasStadiaKey
+          ? '<a href="https://stadiamaps.com/" target="_blank" rel="noopener">© Stadia Maps</a> · <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">© OpenStreetMap</a>'
+          : '<a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">© OpenStreetMap (raw tiles)</a>';
+      }
+      // Hide geoloc button if API unsupported or insecure context.
+      const isSecure = location.protocol === "https:" || location.hostname === "localhost" || location.hostname === "127.0.0.1";
+      if (!("geolocation" in navigator) || !isSecure) {
+        $("locate").hidden = true;
+      }
       const prefs = loadPrefs();
 
       // Migration: old shape was {lat, lng, radius, fuel}; new shape is {q, label, lat, lng, radius, fuel}.
@@ -268,7 +805,7 @@
     // ---------- Best Value helpers ----------
 
     const DEFAULT_FILL_VOLUME = 40;
-    const DEFAULT_CONSUMPTION = 7;
+    const DEFAULT_CONSUMPTION = 8;
 
     function trackedFuel() {
       return state.fuel === "all" ? "e10" : state.fuel;
@@ -297,7 +834,8 @@
     }
 
     function bestValueOf(station, fuel, volume, consumption) {
-      return effectiveCost(station[fuel], station.dist, volume, consumption);
+      const { km } = distanceFor(station);
+      return effectiveCost(station[fuel], km, volume, consumption);
     }
 
     // findMinBy walks the (already-sorted) station list and returns the FIRST
@@ -329,6 +867,18 @@
       const f = trackedFuel();
       const label = fuelLabelFor(f);
       return state.fuel === "all" ? `Best Value (${label})*` : `Best Value (${label})`;
+    }
+
+    // Get the driving distance (km) for a station, falling back to straight-line.
+    // Returns {km, isReal} — `isReal=false` means OSRM didn't return a value for
+    // this station (pending, errored, or no-route). Caller uses isReal to decide
+    // whether to render the per-cell `~` marker.
+    function distanceFor(station) {
+      const hit = state.distances.get(station.id);
+      if (hit && Number.isFinite(hit.meters)) {
+        return { km: hit.meters / 1000, isReal: true };
+      }
+      return { km: station.dist, isReal: false };
     }
 
     function priceCell(p, cheapest, stationId, fuel) {
@@ -444,11 +994,19 @@
         const net = bestValueOf(s, fuel, volume, consumption);
         const isWinner = bestValueStation && s.id === bestValueStation.id;
         const cls = isWinner ? "price cheap" : "price";
+        const { isReal } = distanceFor(s);
+        // Per-cell `~` (Default #13 mixed-case + revised): when OSRM matrix
+        // landed but this station got no route, mark this cell's value as
+        // approximate. When the whole matrix is pending/errored, the HEADER
+        // carries the mark, not the cell.
+        const cellMark = state.osrmStatus === "ready" && !isReal
+          ? ` <span class="approx-mark" aria-label="approximate for this station — no road route from OSRM" title="No road route from OSRM — using straight-line distance">~</span>`
+          : "";
         const labelSpan = `<span class="mobile-label">BEST VALUE (${escapeHtml(fuelLabel.toUpperCase())})${showAsterisk ? "*" : ""}</span>`;
         if (!Number.isFinite(net)) {
           return `<td>${labelSpan}<span class="price na">—</span></td>`;
         }
-        return `<td>${labelSpan}<span class="${cls}">${net.toFixed(2)} €/fill</span></td>`;
+        return `<td>${labelSpan}<span class="${cls}">${net.toFixed(2)} €/fill</span>${cellMark}</td>`;
       };
 
       const rows = sorted.map((s) => `
@@ -466,9 +1024,20 @@
         </tr>
       `).join("");
 
-      const bestValueHeader = showAsterisk
+      // Header text + uncertainty mark (Default #13, reversed per Codex #8):
+      // - osrmStatus=pending → `~` after the column name (computing real distance)
+      // - osrmStatus=ready   → no mark (we have the real answer)
+      // - osrmStatus=error   → `~` stays (we never got the real answer)
+      const headerBase = showAsterisk
         ? `${escapeHtml(headerText.replace(/\*$/, ""))}<sup title="When fuel is set to All, Best Value defaults to E10.">*</sup><span class="sr-only">When fuel is set to All, Best Value defaults to E10.</span>`
         : escapeHtml(headerText);
+      let uncertaintyMark = "";
+      if (state.osrmStatus === "pending") {
+        uncertaintyMark = ` <span class="approx-mark" aria-label="approximate — using straight-line distance, computing real driving distance now" title="Approximate — using straight-line distance. Re-computing with real driving distance via OSRM.">~</span>`;
+      } else if (state.osrmStatus === "error") {
+        uncertaintyMark = ` <span class="approx-mark" aria-label="approximate — routing unavailable, using straight-line distance" title="Routing unavailable — using straight-line distance.">~</span>`;
+      }
+      const bestValueHeader = headerBase + uncertaintyMark;
 
       result.innerHTML = `
         <table>
@@ -486,6 +1055,21 @@
           <tbody>${rows}</tbody>
         </table>
       `;
+
+      // Row click → pan map to that station + draw route (null-safe if map not init'd).
+      for (const tr of result.querySelectorAll("tbody tr")) {
+        const stationId = sorted[Array.from(tr.parentElement.children).indexOf(tr)]?.id;
+        if (!stationId) continue;
+        tr.style.cursor = "pointer";
+        tr.addEventListener("click", () => {
+          const s = state.stations.find((x) => x.id === stationId);
+          if (!s) return;
+          if (state.map && s.isOpen) {
+            state.map.panTo([s.lat, s.lng]);
+            onStationMarkerClick(s);
+          }
+        });
+      }
 
       for (const th of result.querySelectorAll("th[data-col]")) {
         const toggleSort = () => {
@@ -541,6 +1125,10 @@
       state.refreshInflight = controller;
 
       setStatus("fetching…");
+      // Reset OSRM state for the new fetch (Default #13 lifecycle).
+      state.osrmStatus = "pending";
+      state.distances = new Map();
+      clearRoute();
       const params = new URLSearchParams({
         lat: String(state.location.lat),
         lng: String(state.location.lng),
@@ -562,6 +1150,21 @@
         $("last-fetch").textContent = `updated ${ts.toLocaleTimeString()}`;
         setStatus(`${state.stations.length} stations`, "ok");
         render();
+        // Kick off the map + OSRM distances in parallel (best-effort).
+        initMap()
+          .then(() => {
+            ensureUserMarker();
+            // updateMarkers is called from render() side effects via syncMap below.
+            syncMapAfterRender();
+            fitMapToAll();
+          })
+          .catch(() => {
+            // Map failed to load — table remains usable.
+          });
+        // Fire OSRM distances; render() will re-run with state.osrmStatus + state.distances.
+        fetchDistances().then(() => {
+          syncMapAfterRender();
+        });
         scheduleNext();
       } catch (err) {
         if (err.name === "AbortError") return;
@@ -570,6 +1173,20 @@
       } finally {
         if (state.refreshInflight === controller) state.refreshInflight = null;
       }
+    }
+
+    // Re-derive winner + push marker icons after each render.
+    function syncMapAfterRender() {
+      if (!state.map) return;
+      const fuel = trackedFuel();
+      const volume = getFillVolume();
+      const consumption = getConsumption();
+      const winner = findMinBy(
+        state.stations,
+        (s) => bestValueOf(s, fuel, volume, consumption),
+        true,
+      );
+      updateMarkers(winner ? winner.id : null);
     }
 
     function scheduleNext() {
@@ -631,6 +1248,8 @@
       };
       $("q").value = result.label;
       closePicker();
+      state.requestEpoch++;
+      state.hasFitBounds = false; // re-fit on new location
       refresh();
     }
 
@@ -762,28 +1381,7 @@
       if (state.stations.length) render();
     });
 
-    $("locate").addEventListener("click", () => {
-      if (!navigator.geolocation) {
-        setStatus("geolocation unavailable", "err");
-        return;
-      }
-      setStatus("locating…");
-      navigator.geolocation.getCurrentPosition(
-        (pos) => {
-          state.location = {
-            q: "",
-            label: "Current location",
-            lat: pos.coords.latitude,
-            lng: pos.coords.longitude,
-          };
-          $("q").value = state.location.label;
-          closePicker();
-          refresh();
-        },
-        (err) => setStatus("geolocation: " + err.message, "err"),
-        { enableHighAccuracy: false, timeout: 10000 },
-      );
-    });
+    $("locate").addEventListener("click", onGeolocClick);
 
     init();
   </script>
