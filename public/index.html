@@ -60,6 +60,24 @@
     .price.cheap { color: var(--accent); }
     .price.na { color: var(--muted); font-weight: 400; }
     .dist { color: var(--muted); font-variant-numeric: tabular-nums; }
+    .field-q { position: relative; grid-column: span 2; min-width: 0; }
+    .q-results {
+      position: absolute; top: calc(100% + 4px); left: 0; right: 0;
+      background: var(--panel); border: 1px solid var(--border); border-radius: 6px;
+      max-height: 280px; overflow-y: auto; z-index: 10;
+      box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+    }
+    .q-results[hidden] { display: none; }
+    .q-result {
+      padding: 8px 10px; cursor: pointer; font-size: 13px;
+      border-bottom: 1px solid var(--border);
+    }
+    .q-result:last-child { border-bottom: none; }
+    .q-result:hover, .q-result.highlight { background: var(--panel-2); color: var(--text); }
+    .q-result.empty, .q-result.error {
+      color: var(--muted); font-style: italic; cursor: default;
+    }
+    .q-result.error { color: var(--err); font-style: normal; }
     .cell-stack { display: flex; flex-direction: column; gap: 2px; }
     .spark { height: 14px; min-width: 60px; color: var(--muted); }
     .spark-svg { display: block; }
@@ -70,6 +88,11 @@
       text-transform: uppercase; letter-spacing: 0.05em; }
     .badge.open { background: rgba(74, 222, 128, 0.15); color: var(--accent); }
     .badge.closed { background: rgba(91, 97, 112, 0.2); color: var(--closed); }
+    .mobile-label { display: none; }
+    .sr-only {
+      position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+      overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
+    }
     .empty, .error { padding: 40px 20px; text-align: center; color: var(--muted); }
     .error { color: var(--err); }
     .footer { margin-top: 24px; font-size: 11px; color: var(--muted); text-align: center; }
@@ -96,6 +119,7 @@
           "name status"
           "e5 e10"
           "diesel diesel"
+          "bestvalue bestvalue"
           "dist dist";
         column-gap: 12px; row-gap: 10px;
       }
@@ -106,7 +130,8 @@
       tr > td:nth-of-type(3) { grid-area: e5; }
       tr > td:nth-of-type(4) { grid-area: e10; }
       tr > td:nth-of-type(5) { grid-area: diesel; }
-      tr > td:nth-of-type(6) { grid-area: dist; color: var(--muted); font-size: 11px; }
+      tr > td:nth-of-type(6) { grid-area: bestvalue; }
+      tr > td:nth-of-type(7) { grid-area: dist; color: var(--muted); font-size: 11px; }
 
       /* Add tiny fuel labels above each price on mobile */
       tr > td:nth-of-type(3)::before { content: "E5"; }
@@ -115,6 +140,12 @@
       tr > td:nth-of-type(3)::before,
       tr > td:nth-of-type(4)::before,
       tr > td:nth-of-type(5)::before {
+        display: block; font-size: 10px; color: var(--muted);
+        text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 2px;
+      }
+
+      /* Show the dynamic Best Value label only on mobile */
+      .mobile-label {
         display: block; font-size: 10px; color: var(--muted);
         text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 2px;
       }
@@ -128,13 +159,12 @@
   </header>
   <main>
     <form class="controls" id="controls">
-      <div class="field">
-        <label for="lat">Latitude</label>
-        <input id="lat" type="number" step="any" required />
-      </div>
-      <div class="field">
-        <label for="lng">Longitude</label>
-        <input id="lng" type="number" step="any" required />
+      <div class="field field-q">
+        <label for="q">Location</label>
+        <input id="q" type="search" autocomplete="off" spellcheck="false"
+               placeholder="Try 'Berlin Mitte' or 'Stuttgart Hauptbahnhof'"
+               aria-autocomplete="list" aria-controls="q-results" aria-expanded="false" />
+        <div id="q-results" class="q-results" role="listbox" hidden></div>
       </div>
       <div class="field">
         <label for="radius">Radius (km)</label>
@@ -149,6 +179,14 @@
           <option value="diesel">Diesel</option>
         </select>
       </div>
+      <div class="field">
+        <label for="fill-volume">Fill (L)</label>
+        <input id="fill-volume" type="number" min="10" max="100" step="1" placeholder="40" />
+      </div>
+      <div class="field">
+        <label for="consumption">Consumption (L/100km)</label>
+        <input id="consumption" type="number" min="1" max="30" step="0.5" placeholder="7" />
+      </div>
       <div class="actions">
         <button type="button" id="locate">📍 Locate me</button>
         <button type="submit" class="primary">Refresh</button>
@@ -158,7 +196,9 @@
     <div id="result"></div>
 
     <div class="footer">
-      Data: <a href="https://creativecommons.tankerkoenig.de/" target="_blank" rel="noopener">Tankerkönig (CC BY 4.0)</a>
+      Prices: <a href="https://creativecommons.tankerkoenig.de/" target="_blank" rel="noopener">Tankerkönig (CC BY 4.0)</a>
+      · Geocoding: <a href="https://photon.komoot.io/" target="_blank" rel="noopener">komoot/Photon</a>
+      using <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap (ODbL)</a>
       · Auto-refresh every 5 min · <span id="last-fetch">never</span>
     </div>
   </main>
@@ -167,12 +207,19 @@
     const $ = (id) => document.getElementById(id);
     const STORAGE_KEY = "gas-monitor-prefs";
     const REFRESH_MS = 5 * 60 * 1000;
+    const SEARCH_DEBOUNCE_MS = 300;
 
     const state = {
       sort: { col: "dist", dir: "asc" },
       stations: [],
+      fuel: "all",
       refreshTimer: null,
-      inflight: null,
+      refreshInflight: null,
+      searchInflight: null,
+      searchDebounce: null,
+      lastSearched: null,
+      location: { q: "", label: "", lat: 0, lng: 0 },
+      picker: { open: false, results: [], highlight: 0, mode: "results" }, // mode: results | empty | loading | error
     };
 
     function loadPrefs() {
@@ -189,10 +236,23 @@
     async function init() {
       const cfg = await fetch("/api/config").then((r) => r.json());
       const prefs = loadPrefs();
-      $("lat").value = prefs.lat ?? cfg.defaultLat;
-      $("lng").value = prefs.lng ?? cfg.defaultLng;
+
+      // Migration: old shape was {lat, lng, radius, fuel}; new shape is {q, label, lat, lng, radius, fuel}.
+      // If lat/lng present but no q, seed location from coords with a placeholder label.
+      if (typeof prefs.lat === "number" && typeof prefs.lng === "number" && !prefs.q) {
+        state.location = { q: "", label: "Saved coordinates", lat: prefs.lat, lng: prefs.lng };
+      } else if (prefs.q && typeof prefs.lat === "number" && typeof prefs.lng === "number") {
+        state.location = { q: prefs.q, label: prefs.label || prefs.q, lat: prefs.lat, lng: prefs.lng };
+      } else {
+        state.location = { q: "", label: "", lat: cfg.defaultLat, lng: cfg.defaultLng };
+      }
+      $("q").value = state.location.label || "";
       $("radius").value = prefs.radius ?? cfg.defaultRadius;
       $("fuel").value = prefs.fuel ?? "all";
+      state.fuel = $("fuel").value;
+      // Validate-on-read for fillVolume and consumption.
+      $("fill-volume").value = clampNum(prefs.fillVolume, 10, 100, DEFAULT_FILL_VOLUME);
+      $("consumption").value = clampNum(prefs.consumption, 1, 30, DEFAULT_CONSUMPTION);
       if (!cfg.hasApiKey) {
         setStatus("⚠ No API key configured on server", "err");
       }
@@ -203,6 +263,72 @@
       const el = $("status");
       el.textContent = text;
       el.className = "status " + cls;
+    }
+
+    // ---------- Best Value helpers ----------
+
+    const DEFAULT_FILL_VOLUME = 40;
+    const DEFAULT_CONSUMPTION = 7;
+
+    function trackedFuel() {
+      return state.fuel === "all" ? "e10" : state.fuel;
+    }
+
+    function clampNum(v, min, max, fallback) {
+      const n = Number(v);
+      if (!Number.isFinite(n) || n < min || n > max) return fallback;
+      return n;
+    }
+
+    function getFillVolume() {
+      return clampNum($("fill-volume").value, 10, 100, DEFAULT_FILL_VOLUME);
+    }
+
+    function getConsumption() {
+      return clampNum($("consumption").value, 1, 30, DEFAULT_CONSUMPTION);
+    }
+
+    function effectiveCost(price, distKm, volume, consumption) {
+      // net €/fill = price × volume + 2 × dist × (consumption / 100) × price
+      // Returns Infinity for invalid inputs so callers can sort/highlight safely.
+      if (typeof price !== "number" || !Number.isFinite(price) || price <= 0) return Infinity;
+      if (typeof distKm !== "number" || !Number.isFinite(distKm) || distKm < 0) return Infinity;
+      return price * volume + 2 * distKm * (consumption / 100) * price;
+    }
+
+    function bestValueOf(station, fuel, volume, consumption) {
+      return effectiveCost(station[fuel], station.dist, volume, consumption);
+    }
+
+    // findMinBy walks the (already-sorted) station list and returns the FIRST
+    // station with the lowest keyFn result. By iterating over the visible
+    // sort order, ties resolve to the first-on-screen station deterministically.
+    function findMinBy(stations, keyFn, openOnly = true) {
+      let best = null;
+      let bestKey = Infinity;
+      for (const s of stations) {
+        if (openOnly && !s.isOpen) continue;
+        const k = keyFn(s);
+        if (!Number.isFinite(k)) continue;
+        if (k < bestKey) {
+          best = s;
+          bestKey = k;
+        }
+      }
+      return best;
+    }
+
+    function fuelLabelFor(fuelKey) {
+      if (fuelKey === "e5") return "E5";
+      if (fuelKey === "e10") return "E10";
+      if (fuelKey === "diesel") return "Diesel";
+      return fuelKey;
+    }
+
+    function bestValueHeaderText() {
+      const f = trackedFuel();
+      const label = fuelLabelFor(f);
+      return state.fuel === "all" ? `Best Value (${label})*` : `Best Value (${label})`;
     }
 
     function priceCell(p, cheapest, stationId, fuel) {
@@ -265,20 +391,21 @@
         return;
       }
 
-      const cheapest = { e5: Infinity, e10: Infinity, diesel: Infinity };
-      for (const s of state.stations) {
-        if (s.isOpen) {
-          for (const k of ["e5", "e10", "diesel"]) {
-            if (typeof s[k] === "number" && s[k] > 0 && s[k] < cheapest[k]) cheapest[k] = s[k];
-          }
-        }
-      }
-      for (const k of Object.keys(cheapest)) {
-        if (!Number.isFinite(cheapest[k])) cheapest[k] = null;
-      }
+      const fuel = trackedFuel();
+      const volume = getFillVolume();
+      const consumption = getConsumption();
+      const fuelLabel = fuelLabelFor(fuel);
+      const headerText = bestValueHeaderText();
+      const showAsterisk = state.fuel === "all";
 
+      // Compute sort order first so findMinBy + ties resolve to the first-on-screen row.
       const sorted = [...state.stations].sort((a, b) => {
         const { col, dir } = state.sort;
+        if (col === "bestValue") {
+          const ak = bestValueOf(a, fuel, volume, consumption);
+          const bk = bestValueOf(b, fuel, volume, consumption);
+          return dir === "asc" ? ak - bk : bk - ak;
+        }
         const av = a[col];
         const bv = b[col];
         const an = (av === false || av == null) ? Infinity : av;
@@ -289,11 +416,40 @@
         return dir === "asc" ? an - bn : bn - an;
       });
 
+      // Find cheapest open per fuel (raw price) using the shared minimum-finder.
+      const cheapest = { e5: null, e10: null, diesel: null };
+      for (const k of Object.keys(cheapest)) {
+        const winner = findMinBy(
+          sorted,
+          (s) => (typeof s[k] === "number" && s[k] > 0 ? s[k] : Infinity),
+          true,
+        );
+        cheapest[k] = winner ? winner[k] : null;
+      }
+
+      // Find best-value open station for the tracked fuel.
+      const bestValueStation = findMinBy(
+        sorted,
+        (s) => bestValueOf(s, fuel, volume, consumption),
+        true,
+      );
+
       const arrow = (c) => state.sort.col === c ? (state.sort.dir === "asc" ? "↑" : "↓") : "";
       const ariaSort = (c) => state.sort.col === c ? (state.sort.dir === "asc" ? "ascending" : "descending") : "none";
 
       const fmtDist = (d) => (typeof d === "number" && Number.isFinite(d) ? d.toFixed(1) : "?");
       const postCode = (p) => (typeof p === "number" && p > 0 ? p : "");
+
+      const bestValueCell = (s) => {
+        const net = bestValueOf(s, fuel, volume, consumption);
+        const isWinner = bestValueStation && s.id === bestValueStation.id;
+        const cls = isWinner ? "price cheap" : "price";
+        const labelSpan = `<span class="mobile-label">BEST VALUE (${escapeHtml(fuelLabel.toUpperCase())})${showAsterisk ? "*" : ""}</span>`;
+        if (!Number.isFinite(net)) {
+          return `<td>${labelSpan}<span class="price na">—</span></td>`;
+        }
+        return `<td>${labelSpan}<span class="${cls}">${net.toFixed(2)} €/fill</span></td>`;
+      };
 
       const rows = sorted.map((s) => `
         <tr class="${s.isOpen ? "" : "closed"}">
@@ -305,9 +461,14 @@
           ${priceCell(s.e5, cheapest.e5, s.id, "e5")}
           ${priceCell(s.e10, cheapest.e10, s.id, "e10")}
           ${priceCell(s.diesel, cheapest.diesel, s.id, "diesel")}
+          ${bestValueCell(s)}
           <td class="dist">${fmtDist(s.dist)} km</td>
         </tr>
       `).join("");
+
+      const bestValueHeader = showAsterisk
+        ? `${escapeHtml(headerText.replace(/\*$/, ""))}<sup title="When fuel is set to All, Best Value defaults to E10.">*</sup><span class="sr-only">When fuel is set to All, Best Value defaults to E10.</span>`
+        : escapeHtml(headerText);
 
       result.innerHTML = `
         <table>
@@ -318,6 +479,7 @@
               <th data-col="e5" tabindex="0" role="button" aria-sort="${ariaSort("e5")}">E5 <span class="arrow">${arrow("e5")}</span></th>
               <th data-col="e10" tabindex="0" role="button" aria-sort="${ariaSort("e10")}">E10 <span class="arrow">${arrow("e10")}</span></th>
               <th data-col="diesel" tabindex="0" role="button" aria-sort="${ariaSort("diesel")}">Diesel <span class="arrow">${arrow("diesel")}</span></th>
+              <th data-col="bestValue" tabindex="0" role="button" aria-sort="${ariaSort("bestValue")}">${bestValueHeader} <span class="arrow">${arrow("bestValue")}</span></th>
               <th data-col="dist" tabindex="0" role="button" aria-sort="${ariaSort("dist")}">Distance <span class="arrow">${arrow("dist")}</span></th>
             </tr>
           </thead>
@@ -355,23 +517,40 @@
     }
 
     async function refresh() {
-      const lat = $("lat").value;
-      const lng = $("lng").value;
+      if (!state.location.lat || !state.location.lng) {
+        setStatus("pick a location to start", "");
+        return;
+      }
       const radius = $("radius").value;
       const fuel = $("fuel").value;
+      state.fuel = fuel;
 
-      savePrefs({ lat, lng, radius, fuel });
+      savePrefs({
+        q: state.location.q,
+        label: state.location.label,
+        lat: state.location.lat,
+        lng: state.location.lng,
+        radius,
+        fuel,
+        fillVolume: getFillVolume(),
+        consumption: getConsumption(),
+      });
 
-      if (state.inflight) state.inflight.abort();
+      if (state.refreshInflight) state.refreshInflight.abort();
       const controller = new AbortController();
-      state.inflight = controller;
+      state.refreshInflight = controller;
 
       setStatus("fetching…");
-      const params = new URLSearchParams({ lat, lng, radius, type: fuel });
+      const params = new URLSearchParams({
+        lat: String(state.location.lat),
+        lng: String(state.location.lng),
+        radius,
+        type: fuel,
+      });
       try {
         const res = await fetch(`/api/stations?${params}`, { signal: controller.signal });
         const body = await res.json();
-        if (state.inflight !== controller) return;
+        if (state.refreshInflight !== controller) return;
         if (!res.ok) {
           state.stations = [];
           $("result").innerHTML = `<div class="error">Error: ${escapeHtml(body.error ?? res.status)}</div>`;
@@ -389,7 +568,7 @@
         setStatus("network error", "err");
         $("result").innerHTML = `<div class="error">Network error: ${escapeHtml(err.message ?? err)}</div>`;
       } finally {
-        if (state.inflight === controller) state.inflight = null;
+        if (state.refreshInflight === controller) state.refreshInflight = null;
       }
     }
 
@@ -398,9 +577,189 @@
       state.refreshTimer = setTimeout(refresh, REFRESH_MS);
     }
 
+    // ---------- Location search ----------
+
+    function openPicker() {
+      state.picker.open = true;
+      $("q-results").hidden = false;
+      $("q").setAttribute("aria-expanded", "true");
+    }
+
+    function closePicker() {
+      state.picker.open = false;
+      $("q-results").hidden = true;
+      $("q").setAttribute("aria-expanded", "false");
+    }
+
+    function renderPicker() {
+      const el = $("q-results");
+      const { mode, results, highlight } = state.picker;
+      if (mode === "loading") {
+        el.innerHTML = '<div class="q-result empty">Searching…</div>';
+      } else if (mode === "empty") {
+        el.innerHTML = '<div class="q-result empty">No locations found — try a different query</div>';
+      } else if (mode === "error") {
+        el.innerHTML = '<div class="q-result error">Location search unavailable — try again in a minute</div>';
+      } else if (results.length === 0) {
+        closePicker();
+        return;
+      } else {
+        el.innerHTML = results
+          .map(
+            (r, i) =>
+              `<div class="q-result${i === highlight ? " highlight" : ""}" role="option" data-i="${i}">${escapeHtml(r.label)}</div>`,
+          )
+          .join("");
+        for (const node of el.querySelectorAll(".q-result")) {
+          node.addEventListener("mousedown", (e) => {
+            e.preventDefault(); // keep focus on input
+            const i = Number(node.dataset.i);
+            pick(state.picker.results[i]);
+          });
+        }
+      }
+      openPicker();
+    }
+
+    function pick(result) {
+      if (!result) return;
+      state.location = {
+        q: $("q").value.trim().replace(/\s+/g, " ").toLowerCase(),
+        label: result.label,
+        lat: result.lat,
+        lng: result.lng,
+      };
+      $("q").value = result.label;
+      closePicker();
+      refresh();
+    }
+
+    async function searchNow(q) {
+      const canon = q.trim().replace(/\s+/g, " ");
+      if (canon.length < 2) {
+        closePicker();
+        return;
+      }
+      if (state.lastSearched === canon.toLowerCase()) return;
+      state.lastSearched = canon.toLowerCase();
+
+      if (state.searchInflight) state.searchInflight.abort();
+      const controller = new AbortController();
+      state.searchInflight = controller;
+
+      state.picker.mode = "loading";
+      state.picker.results = [];
+      state.picker.highlight = 0;
+      renderPicker();
+
+      try {
+        const res = await fetch(`/api/geocode?q=${encodeURIComponent(canon)}`, { signal: controller.signal });
+        if (state.searchInflight !== controller) return;
+        if (!res.ok) {
+          state.picker.mode = "error";
+          state.picker.results = [];
+          renderPicker();
+          return;
+        }
+        const body = await res.json();
+        if (state.searchInflight !== controller) return;
+        const results = Array.isArray(body.results) ? body.results : [];
+        if (results.length === 0) {
+          state.picker.mode = "empty";
+          state.picker.results = [];
+        } else {
+          state.picker.mode = "results";
+          state.picker.results = results;
+          state.picker.highlight = 0;
+        }
+        renderPicker();
+      } catch (err) {
+        if (err.name === "AbortError") return;
+        state.picker.mode = "error";
+        state.picker.results = [];
+        renderPicker();
+      } finally {
+        if (state.searchInflight === controller) state.searchInflight = null;
+      }
+    }
+
+    function debouncedSearch(q) {
+      if (state.searchDebounce) clearTimeout(state.searchDebounce);
+      state.searchDebounce = setTimeout(() => searchNow(q), SEARCH_DEBOUNCE_MS);
+    }
+
+    $("q").addEventListener("input", (e) => {
+      debouncedSearch(e.target.value);
+    });
+
+    $("q").addEventListener("keydown", (e) => {
+      const { picker } = state;
+      if (!picker.open || picker.mode !== "results" || picker.results.length === 0) {
+        if (e.key === "Enter") {
+          // No picker: trigger immediate search or refresh
+          e.preventDefault();
+          if (state.searchDebounce) clearTimeout(state.searchDebounce);
+          if ($("q").value.trim().length >= 2) {
+            searchNow($("q").value);
+          } else {
+            refresh();
+          }
+        }
+        return;
+      }
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        picker.highlight = (picker.highlight + 1) % picker.results.length;
+        renderPicker();
+      } else if (e.key === "ArrowUp") {
+        e.preventDefault();
+        picker.highlight = (picker.highlight - 1 + picker.results.length) % picker.results.length;
+        renderPicker();
+      } else if (e.key === "Enter") {
+        e.preventDefault();
+        pick(picker.results[picker.highlight]);
+      } else if (e.key === "Escape") {
+        e.preventDefault();
+        closePicker();
+      }
+    });
+
+    document.addEventListener("click", (e) => {
+      if (!state.picker.open) return;
+      if (e.target.closest(".field-q")) return;
+      closePicker();
+    });
+
     $("controls").addEventListener("submit", (e) => {
       e.preventDefault();
+      const { picker } = state;
+      if (picker.open && picker.mode === "results" && picker.results.length > 0) {
+        pick(picker.results[picker.highlight]);
+        return;
+      }
+      const q = $("q").value.trim();
+      if (q.length >= 2 && q !== state.location.label) {
+        // User changed the input but didn't pick — fire a search.
+        if (state.searchDebounce) clearTimeout(state.searchDebounce);
+        searchNow(q);
+        return;
+      }
       refresh();
+    });
+
+    // Fuel change re-fetches because the proxy normalizes per-fuel:
+    // switching the dropdown without refetching leaves the new fuel's prices as `false`.
+    $("fuel").addEventListener("change", () => {
+      state.fuel = $("fuel").value;
+      refresh();
+    });
+
+    // Fill volume + consumption changes recompute client-side only — no upstream data needed.
+    $("fill-volume").addEventListener("input", () => {
+      if (state.stations.length) render();
+    });
+    $("consumption").addEventListener("input", () => {
+      if (state.stations.length) render();
     });
 
     $("locate").addEventListener("click", () => {
@@ -411,8 +770,14 @@
       setStatus("locating…");
       navigator.geolocation.getCurrentPosition(
         (pos) => {
-          $("lat").value = pos.coords.latitude.toFixed(5);
-          $("lng").value = pos.coords.longitude.toFixed(5);
+          state.location = {
+            q: "",
+            label: "Current location",
+            lat: pos.coords.latitude,
+            lng: pos.coords.longitude,
+          };
+          $("q").value = state.location.label;
+          closePicker();
           refresh();
         },
         (err) => setStatus("geolocation: " + err.message, "err"),

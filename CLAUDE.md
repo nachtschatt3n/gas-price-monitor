@@ -103,6 +103,16 @@ carries the `Co-Authored-By` trailer.
 3. **No auth on the server.** Designed for private networks (LAN,
    Tailscale, Wireguard). Don't put it on the open internet.
 
+   **Override 2026-05-12:** rule deliberately broken — owner chose to
+   expose publicly without auth or rate limiting. Known risks:
+   Tankerkönig key may be banned by the operator under fair-use; Photon
+   (komoot) may flag the User-Agent for excessive traffic; no abuse
+   protection on `/api/stations`, `/api/geocode`, or `/api/history`.
+   Mitigation if it bites: rotate `TANKERKOENIG_API_KEY`, change
+   `PHOTON_USER_AGENT`, optionally retreat the Ingress to internal-only.
+   Re-evaluate this override if traffic ever exceeds what one person
+   refueling produces.
+
 4. **State is ephemeral in containers.** The k8s Deployment uses
    `emptyDir` for both `/cache` and `/data`. Pod restart wipes history
    and alert dedupe state. If you change this, also reconsider the

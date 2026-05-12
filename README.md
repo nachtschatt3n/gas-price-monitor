@@ -22,8 +22,14 @@ served by Bun, with a tiny proxy endpoint so the API key stays on the server.
 
    ```sh
    cp .env.example .env
-   # then edit .env and paste your TANKERKOENIG_API_KEY
+   # Edit .env and set:
+   #   TANKERKOENIG_API_KEY=...    (your Tankerkönig key)
+   #   PHOTON_USER_AGENT=...       (REQUIRED — identifier for the geocoder)
    ```
+
+   `PHOTON_USER_AGENT` should identify your app and include a contact so
+   komoot (who runs the Photon geocoder we use) can reach you if anything
+   ever misbehaves. Server refuses to boot without it.
 
 4. **Run**:
 
@@ -37,11 +43,20 @@ served by Bun, with a tiny proxy endpoint so the API key stays on the server.
 
 ## Usage
 
-- Enter latitude/longitude/radius, or hit **📍 Locate me** to use the browser's
-  geolocation.
+- Type a location into the search box ("Berlin Mitte", "Stuttgart
+  Hauptbahnhof", "Hauptstraße 42 Berlin") and pick a result. Arrow keys
+  navigate the dropdown; Enter picks; Escape dismisses.
+- Or hit **📍 Locate me** to use the browser's geolocation.
 - Picks the cheapest open station for each fuel grade (highlighted in green).
+- **Best Value column:** factors driving cost into the price. Shows net €/fill
+  for your selected fuel — cheaper-but-far loses to slightly-pricier-but-near
+  once you include the fuel burned getting there. Defaults assume a 40 L
+  fill at 7 L/100km — adjust the **Fill (L)** and **Consumption (L/100km)**
+  inputs to match your car. When Fuel is set to "All", Best Value tracks E10
+  (shown as `Best Value (E10)*`).
 - Auto-refreshes every 5 minutes (the Tankerkönig fair-use limit).
-- Settings are saved to `localStorage`.
+- Search query + picked label + coordinates + radius + fuel are all saved
+  to `localStorage` so reload restores your last view.
 - Each price cell shows a 7-day sparkline once history has accumulated. Green
   trend = falling, red trend = rising, gray = flat. Data persists in
   `data/history.jsonl`.
@@ -57,6 +72,10 @@ served by Bun, with a tiny proxy endpoint so the API key stays on the server.
 - `GET /api/stations?lat=&lng=&radius=&type=` — proxies Tankerkönig's
   `list.php` with server-side 5min disk caching. `type` is `e5`, `e10`,
   `diesel`, or `all`.
+- `GET /api/geocode?q=...` — resolves a freeform query (place name,
+  street, PLZ) to up to 5 `{label, lat, lng}` results via Photon (komoot).
+  Server-side 24h disk cache, German-biased bbox. `q` must be 2-200 chars
+  after canonicalization.
 - `GET /api/history?stationIds=A,B,C&days=7` — historical prices for each
   requested station, grouped by fuel. Up to 50 stationIds per call.
 
@@ -75,12 +94,16 @@ served by Bun, with a tiny proxy endpoint so the API key stays on the server.
 | Env var | Default | Notes |
 |---------|---------|-------|
 | `TANKERKOENIG_API_KEY` | — | Required. |
+| `PHOTON_USER_AGENT` | — | **Required.** Identifier sent to the Photon geocoder. Server refuses to boot if unset. |
+| `PHOTON_BASE_URL` | `https://photon.komoot.io` | Override mostly for testing or self-hosted Photon. |
+| `GEOCODE_CACHE_TTL_MS` | `86400000` (24h) | |
+| `GEOCODE_CACHE_MAX_ENTRIES` | `200` | LRU pruned on write. |
 | `PORT` | `3000` | 1–65535. |
 | `DEFAULT_LAT` | `52.5200` | Berlin Mitte. |
 | `DEFAULT_LNG` | `13.4050` | |
 | `DEFAULT_RADIUS` | `5` | 1–25 km. |
-| `CACHE_DIR` | `.cache` (in repo) | Disk cache location. |
-| `CACHE_TTL_MS` | `300000` (5 min) | |
+| `CACHE_DIR` | `.cache` (in repo) | Disk cache location (stations + geocoder). |
+| `CACHE_TTL_MS` | `300000` (5 min) | Station cache. |
 | `CACHE_MAX_ENTRIES` | `200` | LRU pruned on write. |
 | `DATA_DIR` | `data` (in repo) | Where `history.jsonl` and `alerts-state.json` live. |
 | `HISTORY_MAX_FILE_BYTES` | `52428800` (50 MB) | Rotates `history.jsonl` → `history.N.jsonl` when exceeded. |
