@@ -8,6 +8,13 @@
   POST on threshold crossing, debounced via `data/alerts-state.json`.
 - ✅ Sparkline chart per station — 7-day SVG sparkline in each price cell,
   green/red/gray trend coloring.
+- ✅ **Map view (Leaflet) with real OSRM driving distance** — `src/osrm.ts`
+  + `POST /api/distances` + `GET /api/route`, vendored Leaflet 1.9.4 at
+  `public/lib/`, divIcon markers + draggable user pin + route polyline +
+  geolocation button (5-state machine) + sticky desktop map + mobile
+  height clamp. Shipped v0.2.0.0 (2026-05-13). Fixed the OSRM
+  `destinations` comma-vs-semicolon bug that was making driving distance
+  silently fall back to straight-line for multi-station requests.
 
 ## Open
 
@@ -60,21 +67,42 @@ bookmark. "Add current as new" button.
 
 ---
 
-### Map view (Leaflet/MapLibre)
+### Map accessibility (deferred from design review)
 
-**What:** Optional map tab showing stations as pins, color-coded by current
-price for the selected fuel. Click pin → highlight row in the table.
+**What:** The shipping Map feature is intentionally NOT keyboard or
+screen-reader accessible in v1. The table remains the canonical answer
+for SR / keyboard users; the map is a visual reference layered on top.
 
-**Why:** "Which station is cheapest" answers a price question; "where is
-the cheapest one" answers a route question. Map shows both at once.
+Future a11y pass should add:
 
-**Pros:** Visual at-a-glance. Especially useful when radius > 10km.
+- Leaflet's `keyboard: true` (pan/zoom from kbd) + visible focus rings on
+  station + user pins (`tabindex="0"` on the divIcon wrappers).
+- `aria-label` per marker (e.g., `"Aral Hauptstraße, E10 €1.789, current
+  Best Value winner"`).
+- `role="application"` on the map container + an "Escape returns focus
+  to the table" instruction in the popup.
+- `prefers-reduced-motion`: disable Leaflet pan/zoom animations, draw
+  the route polyline instantly instead of fading in.
+- Verify all pin / polyline colors hit WCAG AA contrast against the
+  `--panel` map-container bg (not just the tile bg — tiles are
+  unpredictable).
 
-**Cons:** Adds a 50KB+ JS dependency (Leaflet) + a tile provider (OSM is
-free, no key). Real scope increase.
+**Why deferred:** The dashboard's a11y baseline (form labels, focus
+rings, `aria-live` status, keyboard sort) is already solid. The map
+adds ~30 LOC of Leaflet-specific a11y glue + interaction quirks
+(Leaflet's focus management is famously rough). For a personal-use
+tool where the table is fully a11y-friendly, deferring is honest
+scoping rather than a regression.
 
-**Depends on / blocked by:** Nothing technical. Decide whether a personal
-tool warrants a map dep.
+**Pros of doing it:** Map becomes usable for keyboard-only users and
+screen readers; removes the only a11y gap in an otherwise accessible
+dashboard.
+
+**Cons:** ~30 LOC + ongoing maintenance of Leaflet ARIA glue; the
+audience for whom this matters on this specific tool is approximately
+zero (personal homelab).
+
+**Depends on / blocked by:** Map feature shipped.
 
 ---
 
