@@ -146,7 +146,7 @@ bun run test:e2e
 The Playwright E2E suite runs against `e2e/test-server.ts`, which serves the
 real frontend with mocked Tankerkönig and Photon responses.
 The checked-in README screenshot in `docs/` was captured from that same
-mocked server, so they can be refreshed without live API credentials.
+mocked server, so it can be refreshed without live API credentials.
 
 ## Container / Kubernetes
 
