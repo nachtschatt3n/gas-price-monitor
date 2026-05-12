@@ -284,11 +284,15 @@ test("Missing tracked-fuel price renders '—' in the Best Value cell", async ({
 
 test("Zero distance is valid (station at user coords) — not treated as missing", async ({ page, request }) => {
   await setScenario(request, "zero-dist");
+  // Force OSRM down so Best Value uses straight-line s.dist (=0 for this station).
+  await request.get("/test/osrm-scenario?name=osrm-down");
   await clearLocalStorage(page);
   await page.reload();
-  // stub-1 has dist=0. The Best Value cell still shows a number (price × volume + 0 = price × volume).
+  // stub-1 has dist=0. Straight-line fallback: price × volume + 0 = price × volume.
   // 1.799 × 40 = 71.96
   await expect(page.locator("table tbody tr").first().locator("td").nth(5)).toContainText("71.96");
+  // Reset for other tests.
+  await request.get("/test/osrm-scenario?name=default");
 });
 
 test("localStorage round-trips fillVolume + consumption across reload", async ({ page }) => {
@@ -314,4 +318,160 @@ test("Out-of-range fillVolume falls back to default for computation", async ({ p
   const fallback = await page.locator("td .price.cheap").filter({ hasText: "€/fill" }).textContent();
   // Same as default (40 L) since out-of-range falls back.
   expect(fallback).toBe(defaultBest);
+});
+
+// ============================================================================
+// Map + OSRM + Geolocation specs (Lane D9)
+// ============================================================================
+
+test.describe("Map: rendering + tile load", () => {
+  test("Leaflet initializes and renders at least one tile", async ({ page }) => {
+    await clearLocalStorage(page);
+    await page.reload();
+    await expect(page.locator(".leaflet-container")).toBeVisible({ timeout: 5000 });
+    // Leaflet renders 6+ tiles for a typical viewport; just assert >=1.
+    await expect(page.locator(".leaflet-tile").first()).toBeVisible({ timeout: 5000 });
+  });
+
+  test("user pin and station markers are rendered as divIcons", async ({ page }) => {
+    await clearLocalStorage(page);
+    await page.reload();
+    await expect(page.locator(".leaflet-container")).toBeVisible();
+    // Wait for markers to attach.
+    await expect(page.locator(".gpm-pin--user")).toBeVisible();
+    // Three stations in the default scenario (one closed).
+    await expect(page.locator(".gpm-pin--winner, .gpm-pin--open, .gpm-pin--closed")).toHaveCount(3);
+    // Exactly one winner.
+    await expect(page.locator(".gpm-pin--winner")).toHaveCount(1);
+  });
+});
+
+test.describe("Header `~` lifecycle (Default #13)", () => {
+  test("OSRM success: `~` disappears once /api/distances returns", async ({ page }) => {
+    await clearLocalStorage(page);
+    await page.reload();
+    // Eventually OSRM returns and `~` is gone from the header.
+    await expect(page.locator("table thead .approx-mark")).toHaveCount(0, { timeout: 5000 });
+  });
+
+  test("OSRM error: `~` stays in the header", async ({ page, request }) => {
+    await clearLocalStorage(page);
+    // Force OSRM to 5xx for this test.
+    await request.get("/test/osrm-scenario?name=osrm-down");
+    await page.reload();
+    // The header `~` should still be visible because state.osrmStatus = "error".
+    await expect(page.locator("table thead .approx-mark").first()).toBeVisible({ timeout: 5000 });
+    // Reset for other tests.
+    await request.get("/test/osrm-scenario?name=default");
+  });
+
+  test("Per-cell `~` shown for the no-route station only", async ({ page, request }) => {
+    await clearLocalStorage(page);
+    await request.get("/test/osrm-scenario?name=no-route");
+    await page.reload();
+    // Wait for OSRM to land (header `~` should be gone since matrix arrived).
+    await expect(page.locator("table thead .approx-mark")).toHaveCount(0, { timeout: 5000 });
+    // Exactly one per-cell `~` (the first station in the matrix had null).
+    await expect(page.locator("table tbody td .approx-mark")).toHaveCount(1);
+    await request.get("/test/osrm-scenario?name=default");
+  });
+});
+
+test.describe("Geolocation button (Default #27 state machine)", () => {
+  test("granted: coords update, label becomes 'Current location', refresh fires", async ({ page, context }) => {
+    await context.grantPermissions(["geolocation"]);
+    await context.setGeolocation({ latitude: 52.5, longitude: 13.4 });
+    await clearLocalStorage(page);
+    await page.reload();
+    await expect(page.locator("table tbody tr")).toHaveCount(3, { timeout: 5000 });
+    await page.locator("#locate").click();
+    // After geolocation success, the search box label switches.
+    await expect(page.locator("#q")).toHaveValue("Current location", { timeout: 5000 });
+    // Status still shows stations.
+    await expect(page.locator("#status")).toContainText("stations", { timeout: 5000 });
+  });
+
+  test("denied: inline message shows, label stays put", async ({ page, context }) => {
+    await context.clearPermissions(); // no geolocation permission
+    await clearLocalStorage(page);
+    await page.reload();
+    await expect(page.locator("table tbody tr")).toHaveCount(3, { timeout: 5000 });
+    const labelBefore = await page.locator("#q").inputValue();
+    await page.locator("#locate").click();
+    // Either denied or unsupported — both result in an err-class message.
+    await expect(page.locator("#geoloc-msg.err")).toBeVisible({ timeout: 5000 });
+    // Label is unchanged (no successful coords).
+    expect(await page.locator("#q").inputValue()).toBe(labelBefore);
+  });
+});
+
+test.describe("Sticky map on desktop", () => {
+  test("map element has position:sticky at top:16px on desktop viewport", async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 720 });
+    await clearLocalStorage(page);
+    await page.reload();
+    await expect(page.locator(".map-wrap")).toBeVisible();
+    const wrap = page.locator(".map-wrap");
+    const position = await wrap.evaluate((el) => getComputedStyle(el).position);
+    const top = await wrap.evaluate((el) => getComputedStyle(el).top);
+    expect(position).toBe("sticky");
+    expect(top).toBe("16px");
+  });
+
+  test("mobile viewport: map is full-width, NOT sticky", async ({ page }) => {
+    await page.setViewportSize({ width: 375, height: 667 });
+    await clearLocalStorage(page);
+    await page.reload();
+    const wrap = page.locator(".map-wrap");
+    const position = await wrap.evaluate((el) => getComputedStyle(el).position);
+    expect(position).not.toBe("sticky");
+    // Mobile footnote visible.
+    await expect(page.locator(".map-footnote")).toBeVisible();
+  });
+});
+
+test.describe("API: /api/distances", () => {
+  test("happy path returns id-keyed distance map", async ({ request }) => {
+    const res = await request.post("/api/distances", {
+      data: {
+        userLat: 52.52,
+        userLng: 13.405,
+        stations: [
+          { id: "stub-1", lat: 52.521, lng: 13.41 },
+          { id: "stub-2", lat: 52.519, lng: 13.39 },
+        ],
+      },
+    });
+    expect(res.status()).toBe(200);
+    const body = (await res.json()) as { distances: Record<string, { meters: number; seconds: number }> };
+    expect(body.distances["stub-1"]?.meters).toBeGreaterThan(0);
+    expect(body.distances["stub-2"]?.meters).toBeGreaterThan(0);
+  });
+
+  test("rejects >50 stations with 400", async ({ request }) => {
+    const stations = Array.from({ length: 51 }, (_, i) => ({ id: `s${i}`, lat: 52.5, lng: 13.4 }));
+    const res = await request.post("/api/distances", {
+      data: { userLat: 52.52, userLng: 13.405, stations },
+    });
+    expect(res.status()).toBe(400);
+  });
+});
+
+test.describe("API: /api/route", () => {
+  test("happy path returns geometry + meters + seconds", async ({ request }) => {
+    const res = await request.get(
+      "/api/route?fromLat=52.52&fromLng=13.405&toLat=52.521&toLng=13.41",
+    );
+    expect(res.status()).toBe(200);
+    const body = (await res.json()) as { meters: number; geometry: { coordinates: unknown[] } };
+    expect(body.meters).toBeGreaterThan(0);
+    expect(Array.isArray(body.geometry.coordinates)).toBe(true);
+  });
+
+  test("from == to returns 400", async ({ request }) => {
+    const res = await request.get(
+      "/api/route?fromLat=52.52&fromLng=13.405&toLat=52.52&toLng=13.405",
+    );
+    expect(res.status()).toBe(400);
+  });
 });
