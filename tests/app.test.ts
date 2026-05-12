@@ -62,6 +62,11 @@ function env(overrides: Partial<AppEnv> = {}): AppEnv {
     photonBaseUrl: "https://photon.test",
     geocodeCacheTtlMs: 60_000,
     geocodeCacheMaxEntries: 200,
+    osrmUserAgent: "gas-price-monitor (test)",
+    osrmBaseUrl: "https://osrm.test",
+    osrmCacheTtlMs: 60_000,
+    osrmCacheMaxEntries: 200,
+    stadiaApiKey: "",
     ...overrides,
   };
 }
@@ -70,8 +75,18 @@ function mockFetch(body: unknown, status = 200): typeof fetch {
   return (async () => new Response(JSON.stringify(body), { status })) as unknown as typeof fetch;
 }
 
-async function call(app: ReturnType<typeof createApp>, method: string, path: string): Promise<Response> {
-  const req = new Request(`http://localhost${path}`, { method });
+async function call(
+  app: ReturnType<typeof createApp>,
+  method: string,
+  path: string,
+  body?: unknown,
+): Promise<Response> {
+  const init: RequestInit = { method };
+  if (body !== undefined) {
+    init.body = typeof body === "string" ? body : JSON.stringify(body);
+    init.headers = { "Content-Type": "application/json" };
+  }
+  const req = new Request(`http://localhost${path}`, init);
   const url = new URL(req.url);
   const route = (app.routes as Record<string, Record<string, (r: Request) => Response | Promise<Response>>>)[
     url.pathname
@@ -84,7 +99,10 @@ async function call(app: ReturnType<typeof createApp>, method: string, path: str
   return await app.fetch(req);
 }
 
-const MIN_ENV = { PHOTON_USER_AGENT: "gas-price-monitor (test)" };
+const MIN_ENV = {
+  PHOTON_USER_AGENT: "gas-price-monitor (test)",
+  OSRM_USER_AGENT: "gas-price-monitor (test)",
+};
 
 describe("parseEnv", () => {
   test("returns defaults when only required env is set", () => {
@@ -101,13 +119,40 @@ describe("parseEnv", () => {
       photonBaseUrl: "https://photon.komoot.io",
       geocodeCacheTtlMs: 24 * 60 * 60 * 1000,
       geocodeCacheMaxEntries: 200,
+      osrmUserAgent: "gas-price-monitor (test)",
+      osrmBaseUrl: "https://router.project-osrm.org",
+      osrmCacheTtlMs: 7 * 24 * 60 * 60 * 1000,
+      osrmCacheMaxEntries: 500,
+      stadiaApiKey: "",
     });
   });
 
   test("PHOTON_USER_AGENT is required (throws when missing)", () => {
-    expect(() => parseEnv({}, "/p", "/c", "/d")).toThrow(/PHOTON_USER_AGENT/);
-    expect(() => parseEnv({ PHOTON_USER_AGENT: "" }, "/p", "/c", "/d")).toThrow(/PHOTON_USER_AGENT/);
-    expect(() => parseEnv({ PHOTON_USER_AGENT: "   " }, "/p", "/c", "/d")).toThrow(/PHOTON_USER_AGENT/);
+    expect(() => parseEnv({ OSRM_USER_AGENT: "x" }, "/p", "/c", "/d")).toThrow(/PHOTON_USER_AGENT/);
+    expect(() => parseEnv({ PHOTON_USER_AGENT: "", OSRM_USER_AGENT: "x" }, "/p", "/c", "/d")).toThrow(/PHOTON_USER_AGENT/);
+    expect(() => parseEnv({ PHOTON_USER_AGENT: "   ", OSRM_USER_AGENT: "x" }, "/p", "/c", "/d")).toThrow(/PHOTON_USER_AGENT/);
+  });
+
+  test("OSRM_USER_AGENT is required (throws when missing)", () => {
+    expect(() => parseEnv({ PHOTON_USER_AGENT: "x" }, "/p", "/c", "/d")).toThrow(/OSRM_USER_AGENT/);
+    expect(() => parseEnv({ PHOTON_USER_AGENT: "x", OSRM_USER_AGENT: "  " }, "/p", "/c", "/d")).toThrow(/OSRM_USER_AGENT/);
+  });
+
+  test("OSRM_BASE_URL strips trailing slash", () => {
+    const result = parseEnv(
+      { ...MIN_ENV, OSRM_BASE_URL: "https://osrm.example.com/" },
+      "/p",
+      "/c",
+      "/d",
+    );
+    expect(result.osrmBaseUrl).toBe("https://osrm.example.com");
+  });
+
+  test("STADIA_API_KEY is optional and trimmed", () => {
+    const empty = parseEnv(MIN_ENV, "/p", "/c", "/d");
+    expect(empty.stadiaApiKey).toBe("");
+    const set = parseEnv({ ...MIN_ENV, STADIA_API_KEY: "  my-key  " }, "/p", "/c", "/d");
+    expect(set.stadiaApiKey).toBe("my-key");
   });
 
   test("PHOTON_BASE_URL strips trailing slash", () => {
@@ -170,6 +215,26 @@ describe("/api/config", () => {
     const app = createApp(env({ apiKey: "" }), { fetch: mockFetch(STATION_BODY) });
     const body = (await (await call(app, "GET", "/api/config")).json()) as { hasApiKey: boolean };
     expect(body.hasApiKey).toBe(false);
+  });
+
+  test("reflects Stadia + OSRM flags", async () => {
+    const withStadia = createApp(env({ stadiaApiKey: "abc-123" }), { fetch: mockFetch(STATION_BODY) });
+    const cfg = (await (await call(withStadia, "GET", "/api/config")).json()) as {
+      hasStadiaKey: boolean;
+      stadiaApiKey: string;
+      osrmEnabled: boolean;
+    };
+    expect(cfg.hasStadiaKey).toBe(true);
+    expect(cfg.stadiaApiKey).toBe("abc-123");
+    expect(cfg.osrmEnabled).toBe(true);
+
+    const noStadia = createApp(env({ stadiaApiKey: "" }), { fetch: mockFetch(STATION_BODY) });
+    const cfg2 = (await (await call(noStadia, "GET", "/api/config")).json()) as {
+      hasStadiaKey: boolean;
+      stadiaApiKey: string;
+    };
+    expect(cfg2.hasStadiaKey).toBe(false);
+    expect(cfg2.stadiaApiKey).toBe("");
   });
 });
 
@@ -415,5 +480,213 @@ describe("ValidationError", () => {
   test("carries default status 400", () => {
     const err = new ValidationError("bad");
     expect(err.status).toBe(400);
+  });
+});
+
+const TABLE_BODY = {
+  code: "Ok",
+  distances: [[1000, 2000, 3000]],
+  durations: [[120, 240, 360]],
+};
+
+const ROUTE_BODY = {
+  code: "Ok",
+  routes: [
+    {
+      geometry: {
+        type: "LineString",
+        coordinates: [
+          [13.405, 52.52],
+          [13.41, 52.521],
+        ],
+      },
+      distance: 800,
+      duration: 90,
+    },
+  ],
+};
+
+describe("/api/distances", () => {
+  test("happy path: returns id-keyed distance map", async () => {
+    const app = createApp(env(), { fetch: mockFetch(TABLE_BODY) });
+    const res = await call(app, "POST", "/api/distances", {
+      userLat: 52.52,
+      userLng: 13.405,
+      stations: [
+        { id: "s1", lat: 52.521, lng: 13.41 },
+        { id: "s2", lat: 52.519, lng: 13.39 },
+        { id: "s3", lat: 52.52, lng: 13.42 },
+      ],
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { distances: Record<string, { meters: number }> };
+    expect(body.distances.s1?.meters).toBe(1000);
+    expect(body.distances.s2?.meters).toBe(2000);
+    expect(body.distances.s3?.meters).toBe(3000);
+  });
+
+  test("rejects invalid JSON body", async () => {
+    const app = createApp(env(), { fetch: mockFetch(TABLE_BODY) });
+    const res = await call(app, "POST", "/api/distances", "{not json");
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: string }).error).toMatch(/invalid JSON/i);
+  });
+
+  test("rejects missing userLat/userLng", async () => {
+    const app = createApp(env(), { fetch: mockFetch(TABLE_BODY) });
+    const res = await call(app, "POST", "/api/distances", {
+      stations: [{ id: "s1", lat: 52.5, lng: 13.4 }],
+    });
+    expect(res.status).toBe(400);
+  });
+
+  test("rejects out-of-range user coords", async () => {
+    const app = createApp(env(), { fetch: mockFetch(TABLE_BODY) });
+    const res = await call(app, "POST", "/api/distances", {
+      userLat: 200,
+      userLng: 13.4,
+      stations: [{ id: "s1", lat: 52.5, lng: 13.4 }],
+    });
+    expect(res.status).toBe(400);
+  });
+
+  test("empty stations array returns empty distances (no upstream)", async () => {
+    let calls = 0;
+    const fetchImpl = (async () => {
+      calls++;
+      return new Response(JSON.stringify(TABLE_BODY));
+    }) as unknown as typeof fetch;
+    const app = createApp(env(), { fetch: fetchImpl });
+    const res = await call(app, "POST", "/api/distances", {
+      userLat: 52.52,
+      userLng: 13.405,
+      stations: [],
+    });
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as { distances: object }).distances).toEqual({});
+    expect(calls).toBe(0);
+  });
+
+  test("rejects > 50 stations (Default #16 cap)", async () => {
+    const app = createApp(env(), { fetch: mockFetch(TABLE_BODY) });
+    const stations = Array.from({ length: 51 }, (_, i) => ({
+      id: `s${i}`,
+      lat: 52.5,
+      lng: 13.4,
+    }));
+    const res = await call(app, "POST", "/api/distances", {
+      userLat: 52.52,
+      userLng: 13.405,
+      stations,
+    });
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: string }).error).toMatch(/max 50/i);
+  });
+
+  test("rejects station without id", async () => {
+    const app = createApp(env(), { fetch: mockFetch(TABLE_BODY) });
+    const res = await call(app, "POST", "/api/distances", {
+      userLat: 52.52,
+      userLng: 13.405,
+      stations: [{ lat: 52.5, lng: 13.4 }],
+    });
+    expect(res.status).toBe(400);
+  });
+
+  test("rejects station with bad coords", async () => {
+    const app = createApp(env(), { fetch: mockFetch(TABLE_BODY) });
+    const res = await call(app, "POST", "/api/distances", {
+      userLat: 52.52,
+      userLng: 13.405,
+      stations: [{ id: "s1", lat: "wat", lng: 13.4 }],
+    });
+    expect(res.status).toBe(400);
+  });
+
+  test("upstream 5xx maps to 502 'routing unavailable'", async () => {
+    const app = createApp(env(), { fetch: mockFetch("boom", 500) });
+    const res = await call(app, "POST", "/api/distances", {
+      userLat: 52.52,
+      userLng: 13.405,
+      stations: [{ id: "s1", lat: 52.521, lng: 13.41 }],
+    });
+    expect(res.status).toBe(502);
+    expect(((await res.json()) as { error: string }).error).toBe("routing unavailable");
+  });
+
+  test("stations array missing returns 400", async () => {
+    const app = createApp(env(), { fetch: mockFetch(TABLE_BODY) });
+    const res = await call(app, "POST", "/api/distances", {
+      userLat: 52.52,
+      userLng: 13.405,
+    });
+    expect(res.status).toBe(400);
+  });
+});
+
+describe("/api/route", () => {
+  test("happy path: returns geometry + meters + seconds", async () => {
+    const app = createApp(env(), { fetch: mockFetch(ROUTE_BODY) });
+    const res = await call(
+      app,
+      "GET",
+      "/api/route?fromLat=52.52&fromLng=13.405&toLat=52.521&toLng=13.41",
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      meters: number;
+      seconds: number;
+      geometry: { coordinates: unknown[] };
+    };
+    expect(body.meters).toBe(800);
+    expect(body.seconds).toBe(90);
+    expect(body.geometry.coordinates).toHaveLength(2);
+  });
+
+  test("missing coords returns 400", async () => {
+    const app = createApp(env(), { fetch: mockFetch(ROUTE_BODY) });
+    const res = await call(app, "GET", "/api/route?fromLat=52.52&fromLng=13.405");
+    expect(res.status).toBe(400);
+  });
+
+  test("NaN coords return 400", async () => {
+    const app = createApp(env(), { fetch: mockFetch(ROUTE_BODY) });
+    const res = await call(
+      app,
+      "GET",
+      "/api/route?fromLat=hi&fromLng=13.405&toLat=52.521&toLng=13.41",
+    );
+    expect(res.status).toBe(400);
+  });
+
+  test("out-of-range coords return 400", async () => {
+    const app = createApp(env(), { fetch: mockFetch(ROUTE_BODY) });
+    const res = await call(
+      app,
+      "GET",
+      "/api/route?fromLat=999&fromLng=13.405&toLat=52.521&toLng=13.41",
+    );
+    expect(res.status).toBe(400);
+  });
+
+  test("from == to returns 400 'same point' (Default #26)", async () => {
+    const app = createApp(env(), { fetch: mockFetch(ROUTE_BODY) });
+    const res = await call(
+      app,
+      "GET",
+      "/api/route?fromLat=52.52&fromLng=13.405&toLat=52.52&toLng=13.405",
+    );
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: string }).error).toMatch(/same point/i);
+  });
+
+  test("upstream 5xx maps to 502", async () => {
+    const app = createApp(env(), { fetch: mockFetch("nope", 500) });
+    const res = await call(
+      app,
+      "GET",
+      "/api/route?fromLat=52.52&fromLng=13.405&toLat=52.521&toLng=13.41",
+    );
+    expect(res.status).toBe(502);
   });
 });

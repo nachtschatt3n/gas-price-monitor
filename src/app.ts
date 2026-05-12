@@ -10,6 +10,7 @@ import { StationCache, type CacheConfig } from "./cache.ts";
 import { History } from "./history.ts";
 import { Alerts, type AlertConfig, type AlertThresholds, type AlertDeps } from "./alerts.ts";
 import { Geocoder, GeocoderError } from "./geocoder.ts";
+import { OsrmClient, OsrmError, type Coord, type StationCoord } from "./osrm.ts";
 
 export interface AppEnv {
   apiKey: string;
@@ -29,6 +30,11 @@ export interface AppEnv {
   photonBaseUrl: string;
   geocodeCacheTtlMs: number;
   geocodeCacheMaxEntries: number;
+  osrmUserAgent: string;
+  osrmBaseUrl: string;
+  osrmCacheTtlMs: number;
+  osrmCacheMaxEntries: number;
+  stadiaApiKey: string;
 }
 
 export interface AppDeps {
@@ -39,6 +45,7 @@ export interface AppDeps {
   alerts?: Alerts;
   alertDeps?: AlertDeps;
   geocoder?: Geocoder;
+  osrm?: OsrmClient;
 }
 
 const ALLOWED_TYPES = new Set<RequestedFuel>(["e5", "e10", "diesel", "all"]);
@@ -83,6 +90,13 @@ export function parseEnv(
     );
   }
 
+  const osrmUserAgent = (source.OSRM_USER_AGENT ?? "").trim();
+  if (!osrmUserAgent) {
+    throw new Error(
+      "OSRM_USER_AGENT is required (set it in .env). Identify the app and a contact, e.g. 'gas-price-monitor (you@example.com)'.",
+    );
+  }
+
   return {
     apiKey: source.TANKERKOENIG_API_KEY ?? "",
     defaultLat: numFromEnv("DEFAULT_LAT", 52.52, -90, 90),
@@ -105,6 +119,11 @@ export function parseEnv(
     photonBaseUrl: (source.PHOTON_BASE_URL || "https://photon.komoot.io").replace(/\/+$/, ""),
     geocodeCacheTtlMs: numFromEnv("GEOCODE_CACHE_TTL_MS", 24 * 60 * 60 * 1000, 1000, 7 * 24 * 60 * 60 * 1000),
     geocodeCacheMaxEntries: numFromEnv("GEOCODE_CACHE_MAX_ENTRIES", 200, 10, 10000),
+    osrmUserAgent,
+    osrmBaseUrl: (source.OSRM_BASE_URL || "https://router.project-osrm.org").replace(/\/+$/, ""),
+    osrmCacheTtlMs: numFromEnv("OSRM_CACHE_TTL_MS", 7 * 24 * 60 * 60 * 1000, 1000, 30 * 24 * 60 * 60 * 1000),
+    osrmCacheMaxEntries: numFromEnv("OSRM_CACHE_MAX_ENTRIES", 500, 10, 10000),
+    stadiaApiKey: (source.STADIA_API_KEY ?? "").trim(),
   };
 }
 
@@ -201,10 +220,24 @@ export function createApp(env: AppEnv, deps: AppDeps = {}) {
       { fetch: deps.fetch, now: deps.now },
     );
 
+  const osrm =
+    deps.osrm ??
+    new OsrmClient(
+      {
+        baseUrl: env.osrmBaseUrl,
+        userAgent: env.osrmUserAgent,
+        dir: join(env.cacheDir, "osrm"),
+        ttlMs: env.osrmCacheTtlMs,
+        maxEntries: env.osrmCacheMaxEntries,
+      },
+      { fetch: deps.fetch, now: deps.now },
+    );
+
   void cache.init();
   void history.init();
   void alerts.init();
   void geocoder.init();
+  void osrm.init();
 
   async function fetchAndRecord(
     lat: number,
@@ -303,7 +336,106 @@ export function createApp(env: AppEnv, deps: AppDeps = {}) {
       defaultRadius: env.defaultRadius,
       hasApiKey: env.apiKey.length > 0,
       alertsEnabled: alerts.enabled(),
+      hasStadiaKey: env.stadiaApiKey.length > 0,
+      stadiaApiKey: env.stadiaApiKey,
+      osrmEnabled: true,
     });
+  }
+
+  function parseCoord(lat: unknown, lng: unknown): Coord | null {
+    if (
+      typeof lat !== "number" ||
+      typeof lng !== "number" ||
+      !Number.isFinite(lat) ||
+      !Number.isFinite(lng) ||
+      lat < -90 ||
+      lat > 90 ||
+      lng < -180 ||
+      lng > 180
+    ) {
+      return null;
+    }
+    return { lat, lng };
+  }
+
+  async function postDistances(req: Request): Promise<Response> {
+    try {
+      let body: unknown;
+      try {
+        body = await req.json();
+      } catch {
+        return json({ error: "invalid JSON body" }, 400);
+      }
+      const obj = body as { userLat?: unknown; userLng?: unknown; stations?: unknown };
+      const user = parseCoord(obj.userLat, obj.userLng);
+      if (!user) {
+        return json({ error: "userLat and userLng must be valid coordinates" }, 400);
+      }
+      if (!Array.isArray(obj.stations)) {
+        return json({ error: "stations must be an array" }, 400);
+      }
+      if (obj.stations.length === 0) {
+        return json({ distances: {} });
+      }
+      if (obj.stations.length > 50) {
+        return json({ error: "too many stations (max 50)" }, 400);
+      }
+      const stations: StationCoord[] = [];
+      for (const s of obj.stations) {
+        const rec = s as { id?: unknown; lat?: unknown; lng?: unknown };
+        if (typeof rec.id !== "string" || !rec.id) {
+          return json({ error: "each station needs a string id" }, 400);
+        }
+        const coord = parseCoord(rec.lat, rec.lng);
+        if (!coord) {
+          return json({ error: `station ${rec.id} has invalid coordinates` }, 400);
+        }
+        stations.push({ id: rec.id, lat: coord.lat, lng: coord.lng });
+      }
+      const distances = await osrm.tableDistances(user, stations);
+      return json({ distances });
+    } catch (err) {
+      if (err instanceof OsrmError) {
+        return json({ error: "routing unavailable" }, err.status);
+      }
+      return json({ error: "internal error" }, 500);
+    }
+  }
+
+  async function getRoute(req: Request): Promise<Response> {
+    try {
+      const url = new URL(req.url);
+      const fromLatRaw = url.searchParams.get("fromLat");
+      const fromLngRaw = url.searchParams.get("fromLng");
+      const toLatRaw = url.searchParams.get("toLat");
+      const toLngRaw = url.searchParams.get("toLng");
+      if (!fromLatRaw || !fromLngRaw || !toLatRaw || !toLngRaw) {
+        return json({ error: "fromLat/fromLng/toLat/toLng are required" }, 400);
+      }
+      const from = parseCoord(Number(fromLatRaw), Number(fromLngRaw));
+      const to = parseCoord(Number(toLatRaw), Number(toLngRaw));
+      if (!from || !to) {
+        return json({ error: "fromLat/fromLng/toLat/toLng must be valid coordinates" }, 400);
+      }
+      // Default #26: same-point rejection (5-decimal rounded match).
+      if (
+        Math.round(from.lat * 1e5) === Math.round(to.lat * 1e5) &&
+        Math.round(from.lng * 1e5) === Math.round(to.lng * 1e5)
+      ) {
+        return json({ error: "from and to are the same point" }, 400);
+      }
+      const result = await osrm.route(from, to);
+      return json({
+        geometry: result.geometry,
+        meters: result.meters,
+        seconds: result.seconds,
+      });
+    } catch (err) {
+      if (err instanceof OsrmError) {
+        return json({ error: "routing unavailable" }, err.status);
+      }
+      return json({ error: "internal error" }, 500);
+    }
   }
 
   const routes = {
@@ -311,6 +443,8 @@ export function createApp(env: AppEnv, deps: AppDeps = {}) {
     "/api/stations": { GET: (req: Request) => getStations(req) },
     "/api/history": { GET: (req: Request) => getHistory(req) },
     "/api/geocode": { GET: (req: Request) => getGeocode(req) },
+    "/api/distances": { POST: (req: Request) => postDistances(req) },
+    "/api/route": { GET: (req: Request) => getRoute(req) },
   } as const;
 
   async function fetchFallback(req: Request): Promise<Response> {
@@ -321,5 +455,5 @@ export function createApp(env: AppEnv, deps: AppDeps = {}) {
     return serveStatic(env.publicDir, url.pathname);
   }
 
-  return { fetch: fetchFallback, routes, history, alerts, geocoder };
+  return { fetch: fetchFallback, routes, history, alerts, geocoder, osrm };
 }
