@@ -5,6 +5,32 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and the project adopts a 4-digit `MAJOR.MINOR.PATCH.MICRO` scheme
 (npm `package.json` shows the first three digits).
 
+## [1.0.0.0] - 2026-06-06
+
+### Changed
+- **Map-first dashboard rebuild.** The Leaflet map is now the primary surface,
+  filling the viewport with a floating, squared search overlay (leading
+  magnifier icon, integrated "📍 Use my location" button, autocomplete with
+  place name + grey city subtitle) and the radius/fuel/fill/consumption
+  filters. Replaces the previous header + two-column (table-left / map-right)
+  layout. Zoom control moved to top-right so it clears the overlay.
+- **Stations are now squared cards** in a right-side "Cheapest stations" panel
+  instead of a sortable table. Each card keeps the full feature set: cheapest
+  highlight per fuel, 7-day sparklines, Best Value (€/fill) with the winner
+  highlighted and the per-card `~` straight-line marker, open/closed badge,
+  and distance. A sort-button bar replaces the clickable table headers (all
+  seven sort columns preserved; re-click toggles direction).
+- Borders rounded down to a crisp ~3px throughout (the approved "less round"
+  direction from the design exploration); green accent retained.
+- Mobile stacks search bar → map (48vh) → cards panel → attribution footer;
+  the map is no longer sticky on desktop since it now fills the fold.
+
+### Notes
+- No bundler, single HTML page, and visible OSM/OSRM/tiles attribution all
+  retained (architecture decisions #5 and #7). Zero runtime dependencies.
+- e2e suite rewritten for the card DOM; 41 Playwright specs + 149 unit tests
+  pass. The two sticky-map specs became map-first layout specs.
+
 ## [0.2.0.0] - 2026-05-13
 
 ### Added

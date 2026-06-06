@@ -19,58 +19,67 @@
       --closed: #5b6170;
     }
     * { box-sizing: border-box; }
-    html, body { margin: 0; padding: 0; background: var(--bg); color: var(--text);
+    html, body { margin: 0; padding: 0; height: 100%; background: var(--bg); color: var(--text);
       font: 14px/1.45 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
-    header { padding: 20px 24px; border-bottom: 1px solid var(--border); display: flex;
-      align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; }
-    h1 { margin: 0; font-size: 18px; font-weight: 600; }
+    h1 { margin: 0; font-size: 16px; font-weight: 600; letter-spacing: 0.01em; }
     .status { font-size: 12px; color: var(--muted); }
-    .status .ok { color: var(--accent); }
-    .status .err { color: var(--err); }
-    main { padding: 20px 24px; max-width: 1200px; margin: 0 auto; }
-    .controls { background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
-      padding: 16px; display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-      gap: 12px; margin-bottom: 20px; align-items: end; }
-    .field { display: flex; flex-direction: column; gap: 4px; }
-    label { font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); }
+    .status.ok { color: var(--accent); }
+    .status.err { color: var(--err); }
+
+    /* ---------- App shell: map-first ---------- */
+    .app { display: flex; height: 100vh; width: 100%; }
+    .map-wrap { position: relative; flex: 1 1 auto; min-width: 0; height: 100vh; }
+    .gpm-map { width: 100%; height: 100%; background: var(--panel); border: none;
+      border-radius: 0; overflow: hidden; }
+    .gpm-map--placeholder { display: flex; flex-direction: column; align-items: center;
+      justify-content: center; gap: 8px; color: var(--muted); font-size: 13px;
+      text-align: center; padding: 16px; }
+    .gpm-map__hint { margin: 0; max-width: 280px; }
+    .map-footnote { display: none; }
+    /* Floating squared search overlay */
+    .map-overlay { position: absolute; top: 12px; left: 12px; z-index: 1000;
+      width: 360px; max-width: calc(100% - 24px); display: flex; flex-direction: column; gap: 8px; }
+    .app-title { display: flex; align-items: center; gap: 6px; padding: 0 2px;
+      text-shadow: 0 1px 4px rgba(0, 0, 0, 0.7); }
+    .controls { background: var(--panel); border: 1px solid var(--border); border-radius: 3px;
+      padding: 10px; display: flex; flex-direction: column; gap: 8px;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45); }
+    .field { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+    label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); }
     input, select { background: var(--panel-2); border: 1px solid var(--border); color: var(--text);
-      padding: 8px 10px; border-radius: 6px; font: inherit; min-height: 44px; }
+      padding: 8px 10px; border-radius: 3px; font: inherit; min-height: 40px; }
     input:focus, select:focus { outline: none; border-color: var(--accent); }
     :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
     input:focus-visible, select:focus-visible, button:focus-visible {
       outline: 2px solid var(--accent); outline-offset: 2px; }
     button.primary:focus-visible { outline-color: var(--text); }
-    th:focus-visible { outline-offset: -2px; }
     button { background: var(--panel-2); border: 1px solid var(--border); color: var(--text);
-      padding: 8px 14px; border-radius: 6px; cursor: pointer; font: inherit; min-height: 44px; }
+      padding: 8px 12px; border-radius: 3px; cursor: pointer; font: inherit; min-height: 40px; }
     button:hover { border-color: var(--accent); }
     button.primary { background: var(--accent); color: #0a0d11; border-color: var(--accent); font-weight: 600; }
     button.primary:hover { filter: brightness(1.1); }
     button:disabled { opacity: 0.5; cursor: not-allowed; }
-    .actions { display: flex; gap: 8px; }
-    table { width: 100%; border-collapse: collapse; background: var(--panel); border: 1px solid var(--border);
-      border-radius: 8px; overflow: hidden; }
-    th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--border); }
-    th { background: var(--panel-2); font-size: 11px; text-transform: uppercase;
-      letter-spacing: 0.05em; color: var(--muted); cursor: pointer; user-select: none; white-space: nowrap; }
-    th:hover { color: var(--text); }
-    th .arrow { opacity: 0.5; margin-left: 4px; }
-    tbody tr:last-child td { border-bottom: none; }
-    tbody tr.closed { opacity: 0.45; }
-    .price { font-variant-numeric: tabular-nums; font-weight: 600; }
-    .price.cheap { color: var(--accent); }
-    .price.na { color: var(--muted); font-weight: 400; }
-    .dist { color: var(--muted); font-variant-numeric: tabular-nums; }
-    .field-q { position: relative; grid-column: span 2; min-width: 0; }
+
+    /* Search row: magnifier + input + square locate button */
+    .field-q { position: relative; }
+    .search-row { display: flex; align-items: stretch; gap: 6px; }
+    .search-input { position: relative; flex: 1 1 auto; min-width: 0; display: flex; align-items: center; }
+    .search-icon { position: absolute; left: 10px; display: flex; color: var(--muted); pointer-events: none; }
+    .search-input input { width: 100%; padding-left: 34px; }
+    .locate-btn { flex: 0 0 auto; width: 42px; padding: 0; font-size: 16px; line-height: 1; }
+    .filters { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
+    .filters .primary { grid-column: 1 / -1; }
+
+    /* Autocomplete dropdown — squared */
     .q-results {
       position: absolute; top: calc(100% + 4px); left: 0; right: 0;
-      background: var(--panel); border: 1px solid var(--border); border-radius: 6px;
+      background: var(--panel); border: 1px solid var(--border); border-radius: 3px;
       max-height: 280px; overflow-y: auto; z-index: 10;
-      box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
     }
     .q-results[hidden] { display: none; }
     .q-result {
-      padding: 8px 10px; cursor: pointer; font-size: 13px;
+      padding: 9px 10px; cursor: pointer; font-size: 13px;
       border-bottom: 1px solid var(--border);
     }
     .q-result:last-child { border-bottom: none; }
@@ -79,95 +88,83 @@
       color: var(--muted); font-style: italic; cursor: default;
     }
     .q-result.error { color: var(--err); font-style: normal; }
-    .cell-stack { display: flex; flex-direction: column; gap: 2px; }
+    .q-result .q-sub { display: block; font-size: 11px; color: var(--muted); margin-top: 2px; }
+
+    /* ---------- Right panel: stations ---------- */
+    .panel { flex: 0 0 380px; max-width: 380px; height: 100vh; overflow-y: auto;
+      background: var(--panel); border-left: 1px solid var(--border);
+      display: flex; flex-direction: column; }
+    .panel-head { padding: 14px 16px 10px; border-bottom: 1px solid var(--border);
+      position: sticky; top: 0; background: var(--panel); z-index: 2; }
+    .panel-title { font-size: 15px; font-weight: 600; }
+    .panel-head .status { margin-top: 2px; }
+    .bv-label { margin-top: 8px; font-size: 11px; text-transform: uppercase;
+      letter-spacing: 0.05em; color: var(--muted); }
+    .bv-label sup { font-size: 9px; }
+    .sort-bar { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 8px; }
+    .sort-btn { min-height: 0; padding: 4px 8px; font-size: 11px; border-radius: 3px; }
+    .sort-btn[aria-pressed="true"] { border-color: var(--accent); color: var(--text); }
+    .sort-btn .arrow { opacity: 0.7; margin-left: 2px; }
+
+    #result { padding: 10px 12px; flex: 1 1 auto; }
+    .cards { display: flex; flex-direction: column; gap: 8px; }
+
+    /* Station card — squared */
+    .station-card { background: var(--panel-2); border: 1px solid var(--border); border-radius: 3px;
+      padding: 10px 12px; cursor: pointer; }
+    .station-card:hover { border-color: var(--accent); }
+    .station-card.closed { opacity: 0.5; }
+    .sc-top { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+    .sc-name { font-weight: 600; }
+    .sc-sub { margin-top: 2px; }
+    .sc-fuels { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-top: 8px; }
+    .sc-fuel { display: flex; flex-direction: column; gap: 2px; }
+    .sc-flabel { font-size: 10px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); }
+    .sc-foot { display: flex; align-items: baseline; justify-content: space-between; gap: 8px;
+      margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border); }
+    .sc-bestvalue { font-size: 13px; }
+
+    .price { font-variant-numeric: tabular-nums; font-weight: 600; }
+    .price.cheap { color: var(--accent); }
+    .price.na { color: var(--muted); font-weight: 400; }
+    .dist { color: var(--muted); font-variant-numeric: tabular-nums; font-size: 12px; }
     .spark { height: 14px; min-width: 60px; color: var(--muted); }
     .spark-svg { display: block; }
     .spark-svg.trend-down { color: var(--accent); }
     .spark-svg.trend-up { color: var(--err); }
     .spark-svg.trend-flat { color: var(--muted); }
-    .badge { display: inline-block; padding: 2px 6px; border-radius: 4px; font-size: 11px;
+    .badge { display: inline-block; padding: 2px 6px; border-radius: 3px; font-size: 11px;
       text-transform: uppercase; letter-spacing: 0.05em; }
     .badge.open { background: rgba(74, 222, 128, 0.15); color: var(--accent); }
     .badge.closed { background: rgba(91, 97, 112, 0.2); color: var(--closed); }
-    .mobile-label { display: none; }
+    .approx-mark { color: var(--muted); font-weight: normal; margin-left: 2px; cursor: help; }
     .sr-only {
       position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
       overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
     }
-    .empty, .error { padding: 40px 20px; text-align: center; color: var(--muted); }
+    .empty, .error { padding: 30px 16px; text-align: center; color: var(--muted); }
     .error { color: var(--err); }
-    .footer { margin-top: 24px; font-size: 11px; color: var(--muted); text-align: center; }
+    .footer { padding: 12px 16px; font-size: 11px; color: var(--muted); border-top: 1px solid var(--border); }
     .footer a { color: var(--muted); text-decoration: underline; text-underline-offset: 2px;
       text-decoration-color: var(--border); }
     .footer a:hover { text-decoration-color: var(--accent); color: var(--text); }
 
-    /* ---------- Map (Leaflet) ---------- */
-    /* CRITICAL: do NOT add overflow: auto/hidden to any ancestor of #map.
-       position: sticky silently breaks when any ancestor has overflow. */
-    .layout {
-      display: flex;
-      flex-direction: column;
-      gap: 16px;
-    }
-    /* Mobile: map first (Default #12 — "map IS the answer on mobile").
-       Desktop overrides this in the ≥1024px block. */
-    .map-wrap { order: -1; }
-    .table-wrap { order: 0; }
-    .map-wrap {
-      position: relative;
-      width: 100%;
-      height: min(400px, 55vh);
-    }
-    .gpm-map {
-      width: 100%;
-      height: 100%;
-      background: var(--panel);
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      overflow: hidden;
-    }
-    .gpm-map--placeholder {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      gap: 8px;
-      color: var(--muted);
-      font-size: 13px;
-      text-align: center;
-      padding: 16px;
-    }
-    .gpm-map__hint { margin: 0; max-width: 280px; }
-    .map-footnote {
-      font-size: 11px;
-      color: var(--muted);
-      text-align: center;
-      margin-top: 4px;
-    }
-    /* Leaflet visual overrides — dark theme integration */
-    .leaflet-container {
-      background: var(--panel);
-      font-family: inherit;
-      font-size: 12px;
-    }
+    /* ---------- Map (Leaflet) ----------
+       CRITICAL: do NOT add overflow: auto/hidden to any ANCESTOR of #map.
+       .panel (a sibling, not an ancestor) carries the scroll, so the map is safe. */
+    .leaflet-container { background: var(--panel); font-family: inherit; font-size: 12px; }
     .leaflet-control-zoom a,
     .leaflet-control-attribution {
       background: var(--panel-2) !important;
       color: var(--muted) !important;
       border-color: var(--border) !important;
     }
-    .leaflet-control-zoom a:hover {
-      background: var(--border) !important;
-      color: var(--text) !important;
-    }
+    .leaflet-control-zoom a:hover { background: var(--border) !important; color: var(--text) !important; }
     .leaflet-control-attribution a { color: var(--muted) !important; }
     .leaflet-control-attribution a:hover { color: var(--text) !important; }
     .leaflet-popup-content-wrapper {
-      background: var(--panel-2);
-      color: var(--text);
-      border: 1px solid var(--border);
-      border-radius: 6px;
-      box-shadow: none;
+      background: var(--panel-2); color: var(--text); border: 1px solid var(--border);
+      border-radius: 3px; box-shadow: none;
     }
     .leaflet-popup-tip { background: var(--panel-2); border: 1px solid var(--border); }
     .leaflet-popup-close-button { color: var(--muted); }
@@ -178,176 +175,104 @@
     /* divIcons should not have Leaflet's default background/border */
     .gpm-pin { background: transparent; border: none; }
 
-    /* "Use my location" inline status */
-    .geoloc-row {
-      grid-column: 1 / -1;
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      flex-wrap: wrap;
-    }
-    .geoloc-msg {
-      font-size: 12px;
-      color: var(--muted);
-    }
-    .geoloc-msg.err { color: var(--err); }
-    .geoloc-msg.ok { color: var(--accent); }
-    /* Best Value uncertainty mark (Default #13 — ~ during straight-line, gone on OSRM ready) */
-    .approx-mark {
-      color: var(--muted);
-      font-weight: normal;
-      margin-left: 2px;
-      cursor: help;
-    }
-
-    /* Desktop ≥1024px: table left 60%, map right 40%, map sticky top:16px.
-       Page-level scroll only (eng review D2). */
-    @media (min-width: 1024px) {
-      .layout {
-        flex-direction: row;
-        gap: 20px;
-        align-items: flex-start;
-      }
-      /* Reset mobile ordering: table left, map right. */
-      .map-wrap { order: 1; }
-      .table-wrap { order: 0; }
-      .map-wrap {
-        flex: 0 0 40%;
-        max-width: 40%;
-        height: min(600px, calc(100vh - 32px));
-        position: sticky;
-        top: 16px;
-      }
-      .table-wrap {
-        flex: 1 1 60%;
-        min-width: 0;
-      }
-      .map-footnote { display: none; }
-    }
-
-    /* Mobile: collapse 6-col table into card-per-station grid */
-    @media (max-width: 640px) {
-      header { padding: 16px; }
-      main { padding: 16px 12px; }
-      .controls { padding: 12px; gap: 10px; }
-      .actions { grid-column: 1 / -1; }
-
-      table { background: transparent; border: none; border-radius: 0; overflow: visible; }
-      thead { display: none; }
-      tbody, tr, td { display: block; }
-      tr {
-        background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
-        padding: 12px 12px 10px; margin-bottom: 10px;
-        display: grid;
-        grid-template-columns: 1fr 1fr;
-        grid-template-areas:
-          "name status"
-          "e5 e10"
-          "diesel diesel"
-          "bestvalue bestvalue"
-          "dist dist";
-        column-gap: 12px; row-gap: 10px;
-      }
-      tbody tr:last-child { margin-bottom: 0; }
-      tr > td { padding: 0; border: none; }
-      tr > td:nth-of-type(1) { grid-area: name; }
-      tr > td:nth-of-type(2) { grid-area: status; text-align: right; align-self: start; }
-      tr > td:nth-of-type(3) { grid-area: e5; }
-      tr > td:nth-of-type(4) { grid-area: e10; }
-      tr > td:nth-of-type(5) { grid-area: diesel; }
-      tr > td:nth-of-type(6) { grid-area: bestvalue; }
-      tr > td:nth-of-type(7) { grid-area: dist; color: var(--muted); font-size: 11px; }
-
-      /* Add tiny fuel labels above each price on mobile */
-      tr > td:nth-of-type(3)::before { content: "E5"; }
-      tr > td:nth-of-type(4)::before { content: "E10"; }
-      tr > td:nth-of-type(5)::before { content: "DIESEL"; }
-      tr > td:nth-of-type(3)::before,
-      tr > td:nth-of-type(4)::before,
-      tr > td:nth-of-type(5)::before {
-        display: block; font-size: 10px; color: var(--muted);
-        text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 2px;
-      }
-
-      /* Show the dynamic Best Value label only on mobile */
-      .mobile-label {
-        display: block; font-size: 10px; color: var(--muted);
-        text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 2px;
-      }
+    /* ---------- Mobile: stack map over panel ---------- */
+    @media (max-width: 768px) {
+      .app { flex-direction: column; height: auto; }
+      .map-wrap { height: auto; }
+      .gpm-map { height: 48vh; }
+      .map-overlay { position: static; width: auto; max-width: none; padding: 12px 12px 0; }
+      .controls { box-shadow: none; }
+      .app-title { text-shadow: none; }
+      .map-footnote { display: block; font-size: 11px; color: var(--muted);
+        text-align: center; margin: 6px 12px 0; }
+      .panel { flex: none; width: auto; max-width: none; height: auto;
+        border-left: none; border-top: 1px solid var(--border); }
+      .panel-head { position: static; }
+      .filters { grid-template-columns: repeat(4, 1fr); }
     }
   </style>
 </head>
 <body>
-  <header>
-    <h1>⛽ Gas Price Monitor</h1>
-    <div class="status" id="status" role="status" aria-live="polite">loading…</div>
-  </header>
-  <main>
-    <form class="controls" id="controls">
-      <div class="field field-q">
-        <label for="q">Location</label>
-        <input id="q" type="search" autocomplete="off" spellcheck="false"
-               placeholder="Try 'Berlin Mitte' or 'Stuttgart Hauptbahnhof'"
-               aria-autocomplete="list" aria-controls="q-results" aria-expanded="false" />
-        <div id="q-results" class="q-results" role="listbox" hidden></div>
+  <div class="app">
+    <div class="map-wrap">
+      <div class="map-overlay">
+        <h1 class="app-title">⛽ Gas Price Monitor</h1>
+        <form class="controls" id="controls">
+          <div class="field field-q">
+            <label for="q" class="sr-only">Location</label>
+            <div class="search-row">
+              <div class="search-input">
+                <span class="search-icon" aria-hidden="true">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+                    <circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/>
+                  </svg>
+                </span>
+                <input id="q" type="search" autocomplete="off" spellcheck="false"
+                       placeholder="Search a place — e.g. Berlin Mitte"
+                       aria-autocomplete="list" aria-controls="q-results" aria-expanded="false" />
+              </div>
+              <button type="button" id="locate" class="locate-btn"
+                      aria-label="Use my current location" title="Use my current location">📍</button>
+            </div>
+            <div id="q-results" class="q-results" role="listbox" hidden></div>
+          </div>
+          <div class="filters">
+            <div class="field">
+              <label for="radius">Radius (km)</label>
+              <input id="radius" type="number" min="1" max="25" step="1" required />
+            </div>
+            <div class="field">
+              <label for="fuel">Fuel</label>
+              <select id="fuel">
+                <option value="all">All</option>
+                <option value="e5">E5</option>
+                <option value="e10">E10</option>
+                <option value="diesel">Diesel</option>
+              </select>
+            </div>
+            <div class="field">
+              <label for="fill-volume">Fill (L)</label>
+              <input id="fill-volume" type="number" min="10" max="100" step="1" placeholder="40" />
+            </div>
+            <div class="field">
+              <label for="consumption">Consumption (L/100km)</label>
+              <input id="consumption" type="number" min="1" max="30" step="0.5" placeholder="8" />
+            </div>
+            <button type="submit" class="primary">Refresh</button>
+          </div>
+          <div class="geoloc-row">
+            <span id="geoloc-msg" class="geoloc-msg" role="status" aria-live="polite"></span>
+          </div>
+        </form>
       </div>
-      <div class="field">
-        <label for="radius">Radius (km)</label>
-        <input id="radius" type="number" min="1" max="25" step="1" required />
+      <div id="map" class="gpm-map gpm-map--placeholder" role="img"
+           aria-label="Map will appear after you search for a location">
+        <svg width="48" height="48" viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 1118 0z"
+                fill="none" stroke="var(--muted)" stroke-width="2"/>
+          <circle cx="12" cy="10" r="3" fill="none" stroke="var(--muted)" stroke-width="2"/>
+        </svg>
+        <p class="gpm-map__hint">Search for a location to see stations on the map.</p>
       </div>
-      <div class="field">
-        <label for="fuel">Fuel</label>
-        <select id="fuel">
-          <option value="all">All</option>
-          <option value="e5">E5</option>
-          <option value="e10">E10</option>
-          <option value="diesel">Diesel</option>
-        </select>
-      </div>
-      <div class="field">
-        <label for="fill-volume">Fill (L)</label>
-        <input id="fill-volume" type="number" min="10" max="100" step="1" placeholder="40" />
-      </div>
-      <div class="field">
-        <label for="consumption">Consumption (L/100km)</label>
-        <input id="consumption" type="number" min="1" max="30" step="0.5" placeholder="8" />
-      </div>
-      <div class="actions">
-        <button type="button" id="locate" aria-label="Use my current location">📍 Use my location</button>
-        <button type="submit" class="primary">Refresh</button>
-      </div>
-      <div class="geoloc-row">
-        <span id="geoloc-msg" class="geoloc-msg" role="status" aria-live="polite"></span>
-      </div>
-    </form>
-
-    <div class="layout">
-      <div class="table-wrap">
-        <div id="result"></div>
-      </div>
-      <div class="map-wrap">
-        <div id="map" class="gpm-map gpm-map--placeholder" role="img"
-             aria-label="Map will appear after you search for a location">
-          <svg width="48" height="48" viewBox="0 0 24 24" aria-hidden="true">
-            <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 1118 0z"
-                  fill="none" stroke="var(--muted)" stroke-width="2"/>
-            <circle cx="12" cy="10" r="3" fill="none" stroke="var(--muted)" stroke-width="2"/>
-          </svg>
-          <p class="gpm-map__hint">Search for a location to see stations on the map.</p>
-        </div>
-        <div class="map-footnote">Drag the pin on desktop, or use 📍 Use my location to refine on mobile.</div>
-      </div>
+      <div class="map-footnote">Drag the pin on desktop, or use 📍 to refine on mobile.</div>
     </div>
 
-    <div class="footer">
-      Prices: <a href="https://creativecommons.tankerkoenig.de/" target="_blank" rel="noopener">Tankerkönig (CC BY 4.0)</a>
-      · Geocoding: <a href="https://photon.komoot.io/" target="_blank" rel="noopener">komoot/Photon</a>
-      using <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap (ODbL)</a>
-      · Tiles: <span id="tile-attr">© OpenStreetMap</span>
-      · Routing: <a href="https://project-osrm.org/" target="_blank" rel="noopener">OSRM</a> via OpenStreetMap
-      · Auto-refresh every 5 min · <span id="last-fetch">never</span>
-    </div>
-  </main>
+    <aside class="panel">
+      <div class="panel-head">
+        <div class="panel-title">Cheapest stations</div>
+        <div class="status" id="status" role="status" aria-live="polite">loading…</div>
+      </div>
+      <div id="result"></div>
+      <div class="footer">
+        Prices: <a href="https://creativecommons.tankerkoenig.de/" target="_blank" rel="noopener">Tankerkönig (CC BY 4.0)</a>
+        · Geocoding: <a href="https://photon.komoot.io/" target="_blank" rel="noopener">komoot/Photon</a>
+        using <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap (ODbL)</a>
+        · Tiles: <span id="tile-attr">© OpenStreetMap</span>
+        · Routing: <a href="https://project-osrm.org/" target="_blank" rel="noopener">OSRM</a> via OpenStreetMap
+        · Auto-refresh every 5 min · <span id="last-fetch">never</span>
+      </div>
+    </aside>
+  </div>
 
   <script type="module">
     const $ = (id) => document.getElementById(id);
@@ -470,9 +395,11 @@
         container.innerHTML = "";
 
         const map = L.map(container, {
-          zoomControl: true,
+          zoomControl: false,
           attributionControl: true,
         }).setView([state.location.lat, state.location.lng], 13);
+        // Zoom control top-right so it clears the floating search overlay (top-left).
+        L.control.zoom({ position: "topright" }).addTo(map);
 
         // Tile layer. Stadia first (with key), OSM fallback.
         const cfg = state.cfg ?? {};
@@ -863,11 +790,6 @@
       return fuelKey;
     }
 
-    function bestValueHeaderText() {
-      const f = trackedFuel();
-      const label = fuelLabelFor(f);
-      return state.fuel === "all" ? `Best Value (${label})*` : `Best Value (${label})`;
-    }
 
     // Get the driving distance (km) for a station, falling back to straight-line.
     // Returns {km, isReal} — `isReal=false` means OSRM didn't return a value for
@@ -881,13 +803,15 @@
       return { km: station.dist, isReal: false };
     }
 
+    // Inline price for a station card. Keeps `.price` / `.price.cheap` / `.spark`
+    // (id `spark-<station>-<fuel>`) so the cheapest highlight + sparkline wiring survive.
     function priceCell(p, cheapest, stationId, fuel) {
+      const sparkId = `spark-${stationId}-${fuel}`;
       if (p === false || p === 0 || p == null) {
-        return '<td><span class="price na">—</span></td>';
+        return `<span class="price na">—</span><span class="spark" id="${sparkId}"></span>`;
       }
       const cls = (cheapest != null && p === cheapest) ? "price cheap" : "price";
-      const sparkId = `spark-${stationId}-${fuel}`;
-      return `<td><div class="cell-stack"><span class="${cls}">${p.toFixed(3)} €</span><span class="spark" id="${sparkId}"></span></div></td>`;
+      return `<span class="${cls}">${p.toFixed(3)} €</span><span class="spark" id="${sparkId}"></span>`;
     }
 
     function renderSparkline(points) {
@@ -945,10 +869,9 @@
       const volume = getFillVolume();
       const consumption = getConsumption();
       const fuelLabel = fuelLabelFor(fuel);
-      const headerText = bestValueHeaderText();
       const showAsterisk = state.fuel === "all";
 
-      // Compute sort order first so findMinBy + ties resolve to the first-on-screen row.
+      // Compute sort order first so findMinBy + ties resolve to the first-on-screen card.
       const sorted = [...state.stations].sort((a, b) => {
         const { col, dir } = state.sort;
         if (col === "bestValue") {
@@ -985,84 +908,85 @@
       );
 
       const arrow = (c) => state.sort.col === c ? (state.sort.dir === "asc" ? "↑" : "↓") : "";
-      const ariaSort = (c) => state.sort.col === c ? (state.sort.dir === "asc" ? "ascending" : "descending") : "none";
-
       const fmtDist = (d) => (typeof d === "number" && Number.isFinite(d) ? d.toFixed(1) : "?");
       const postCode = (p) => (typeof p === "number" && p > 0 ? p : "");
 
-      const bestValueCell = (s) => {
+      // Best-value figure for a card's footer.
+      const bestValueInline = (s) => {
         const net = bestValueOf(s, fuel, volume, consumption);
         const isWinner = bestValueStation && s.id === bestValueStation.id;
         const cls = isWinner ? "price cheap" : "price";
         const { isReal } = distanceFor(s);
-        // Per-cell `~` (Default #13 mixed-case + revised): when OSRM matrix
-        // landed but this station got no route, mark this cell's value as
-        // approximate. When the whole matrix is pending/errored, the HEADER
-        // carries the mark, not the cell.
+        // Per-card `~` (Default #13): OSRM matrix landed but this station got no
+        // road route, so its value falls back to straight-line. When the whole
+        // matrix is pending/errored, the bv-label carries the mark, not the card.
         const cellMark = state.osrmStatus === "ready" && !isReal
           ? ` <span class="approx-mark" aria-label="approximate for this station — no road route from OSRM" title="No road route from OSRM — using straight-line distance">~</span>`
           : "";
-        const labelSpan = `<span class="mobile-label">BEST VALUE (${escapeHtml(fuelLabel.toUpperCase())})${showAsterisk ? "*" : ""}</span>`;
         if (!Number.isFinite(net)) {
-          return `<td>${labelSpan}<span class="price na">—</span></td>`;
+          return `<span class="price na">—</span>${cellMark}`;
         }
-        return `<td>${labelSpan}<span class="${cls}">${net.toFixed(2)} €/fill</span>${cellMark}</td>`;
+        return `<span class="${cls}">${net.toFixed(2)} €/fill</span>${cellMark}`;
       };
 
-      const rows = sorted.map((s) => `
-        <tr class="${s.isOpen ? "" : "closed"}">
-          <td>
-            <div><strong>${escapeHtml(s.name)}</strong></div>
-            <div class="dist">${escapeHtml(s.brand || "")} · ${escapeHtml(s.street)} ${escapeHtml(s.houseNumber || "")}, ${postCode(s.postCode)} ${escapeHtml(s.place)}</div>
-          </td>
-          <td><span class="badge ${s.isOpen ? "open" : "closed"}">${s.isOpen ? "open" : "closed"}</span></td>
-          ${priceCell(s.e5, cheapest.e5, s.id, "e5")}
-          ${priceCell(s.e10, cheapest.e10, s.id, "e10")}
-          ${priceCell(s.diesel, cheapest.diesel, s.id, "diesel")}
-          ${bestValueCell(s)}
-          <td class="dist">${fmtDist(s.dist)} km</td>
-        </tr>
+      const cards = sorted.map((s) => `
+        <article class="station-card${s.isOpen ? "" : " closed"}" data-id="${escapeHtml(s.id)}">
+          <div class="sc-top">
+            <span class="sc-name">${escapeHtml(s.name)}</span>
+            <span class="badge ${s.isOpen ? "open" : "closed"}">${s.isOpen ? "open" : "closed"}</span>
+          </div>
+          <div class="sc-sub dist">${escapeHtml(s.brand || "")} · ${escapeHtml(s.street)} ${escapeHtml(s.houseNumber || "")}, ${postCode(s.postCode)} ${escapeHtml(s.place)}</div>
+          <div class="sc-fuels">
+            <div class="sc-fuel"><span class="sc-flabel">E5</span>${priceCell(s.e5, cheapest.e5, s.id, "e5")}</div>
+            <div class="sc-fuel"><span class="sc-flabel">E10</span>${priceCell(s.e10, cheapest.e10, s.id, "e10")}</div>
+            <div class="sc-fuel"><span class="sc-flabel">Diesel</span>${priceCell(s.diesel, cheapest.diesel, s.id, "diesel")}</div>
+          </div>
+          <div class="sc-foot">
+            <span class="sc-bestvalue">${bestValueInline(s)}</span>
+            <span class="sc-dist dist">${fmtDist(s.dist)} km</span>
+          </div>
+        </article>
       `).join("");
 
-      // Header text + uncertainty mark (Default #13, reversed per Codex #8):
-      // - osrmStatus=pending → `~` after the column name (computing real distance)
+      // Best-value label + uncertainty `~` (Default #13, reversed per Codex #8):
+      // - osrmStatus=pending → `~` (computing real driving distance)
       // - osrmStatus=ready   → no mark (we have the real answer)
       // - osrmStatus=error   → `~` stays (we never got the real answer)
-      const headerBase = showAsterisk
-        ? `${escapeHtml(headerText.replace(/\*$/, ""))}<sup title="When fuel is set to All, Best Value defaults to E10.">*</sup><span class="sr-only">When fuel is set to All, Best Value defaults to E10.</span>`
-        : escapeHtml(headerText);
+      const labelBase = showAsterisk
+        ? `Best Value (${escapeHtml(fuelLabel)})<sup title="When fuel is set to All, Best Value defaults to E10.">*</sup><span class="sr-only">When fuel is set to All, Best Value defaults to E10.</span>`
+        : `Best Value (${escapeHtml(fuelLabel)})`;
       let uncertaintyMark = "";
       if (state.osrmStatus === "pending") {
         uncertaintyMark = ` <span class="approx-mark" aria-label="approximate — using straight-line distance, computing real driving distance now" title="Approximate — using straight-line distance. Re-computing with real driving distance via OSRM.">~</span>`;
       } else if (state.osrmStatus === "error") {
         uncertaintyMark = ` <span class="approx-mark" aria-label="approximate — routing unavailable, using straight-line distance" title="Routing unavailable — using straight-line distance.">~</span>`;
       }
-      const bestValueHeader = headerBase + uncertaintyMark;
+
+      // Sort controls — buttons replace the old clickable table headers. Re-click toggles dir.
+      const SORT_COLS = [
+        ["bestValue", "Best Value"],
+        ["e5", "E5"],
+        ["e10", "E10"],
+        ["diesel", "Diesel"],
+        ["dist", "Distance"],
+        ["name", "Name"],
+        ["isOpen", "Status"],
+      ];
+      const sortButtons = SORT_COLS.map(
+        ([col, lbl]) =>
+          `<button type="button" class="sort-btn" data-col="${col}" aria-pressed="${state.sort.col === col}">${lbl} <span class="arrow">${arrow(col)}</span></button>`,
+      ).join("");
 
       result.innerHTML = `
-        <table>
-          <thead>
-            <tr>
-              <th data-col="name" tabindex="0" role="button" aria-sort="${ariaSort("name")}">Station <span class="arrow">${arrow("name")}</span></th>
-              <th data-col="isOpen" tabindex="0" role="button" aria-sort="${ariaSort("isOpen")}">Status <span class="arrow">${arrow("isOpen")}</span></th>
-              <th data-col="e5" tabindex="0" role="button" aria-sort="${ariaSort("e5")}">E5 <span class="arrow">${arrow("e5")}</span></th>
-              <th data-col="e10" tabindex="0" role="button" aria-sort="${ariaSort("e10")}">E10 <span class="arrow">${arrow("e10")}</span></th>
-              <th data-col="diesel" tabindex="0" role="button" aria-sort="${ariaSort("diesel")}">Diesel <span class="arrow">${arrow("diesel")}</span></th>
-              <th data-col="bestValue" tabindex="0" role="button" aria-sort="${ariaSort("bestValue")}">${bestValueHeader} <span class="arrow">${arrow("bestValue")}</span></th>
-              <th data-col="dist" tabindex="0" role="button" aria-sort="${ariaSort("dist")}">Distance <span class="arrow">${arrow("dist")}</span></th>
-            </tr>
-          </thead>
-          <tbody>${rows}</tbody>
-        </table>
+        <div class="bv-label">${labelBase}${uncertaintyMark}</div>
+        <div class="sort-bar" role="group" aria-label="Sort stations">${sortButtons}</div>
+        <div class="cards">${cards}</div>
       `;
 
-      // Row click → pan map to that station + draw route (null-safe if map not init'd).
-      for (const tr of result.querySelectorAll("tbody tr")) {
-        const stationId = sorted[Array.from(tr.parentElement.children).indexOf(tr)]?.id;
-        if (!stationId) continue;
-        tr.style.cursor = "pointer";
-        tr.addEventListener("click", () => {
-          const s = state.stations.find((x) => x.id === stationId);
+      // Card click → pan map to that station + draw route (null-safe if map not init'd).
+      for (const card of result.querySelectorAll(".station-card")) {
+        card.addEventListener("click", () => {
+          const s = state.stations.find((x) => x.id === card.dataset.id);
           if (!s) return;
           if (state.map && s.isOpen) {
             state.map.panTo([s.lat, s.lng]);
@@ -1071,9 +995,9 @@
         });
       }
 
-      for (const th of result.querySelectorAll("th[data-col]")) {
-        const toggleSort = () => {
-          const col = th.dataset.col;
+      for (const btn of result.querySelectorAll(".sort-btn")) {
+        btn.addEventListener("click", () => {
+          const col = btn.dataset.col;
           if (state.sort.col === col) {
             state.sort.dir = state.sort.dir === "asc" ? "desc" : "asc";
           } else {
@@ -1081,13 +1005,6 @@
             state.sort.dir = "asc";
           }
           render();
-        };
-        th.addEventListener("click", toggleSort);
-        th.addEventListener("keydown", (e) => {
-          if (e.key === "Enter" || e.key === " ") {
-            e.preventDefault();
-            toggleSort();
-          }
         });
       }
 
