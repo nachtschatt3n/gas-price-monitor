@@ -1,5 +1,9 @@
 FROM oven/bun:1.3-alpine
 
+# Pull in Alpine security fixes published after the base tag was cut; the
+# weekly no-cache rebuild (scheduled-rebuild.yml) re-runs this every week.
+RUN apk upgrade --no-cache
+
 WORKDIR /app
 
 COPY src ./src
